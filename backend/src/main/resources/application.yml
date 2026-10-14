@@ -1,0 +1,19 @@
+server:
+  address: 127.0.0.1
+  servlet:
+    session:
+      timeout: 30d
+      cookie:
+        http-only: true
+        same-site: strict
+spring:
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/chaeummdo}
+    username: ${DB_USER:chaeummdo}
+    password: ${DB_PASSWORD:local-development-only}
+  servlet:
+    multipart:
+      max-file-size: 15MB
+      max-request-size: 16MB
+app:
+  media-root: ${MEDIA_ROOT:./.data/media}

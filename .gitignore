@@ -1,0 +1,11 @@
+node_modules/
+dist/
+target/
+*.tsbuildinfo
+.env
+.data/
+backend-starter.zip
+artifacts/
+.playwright-cli/
+output/
+tmp/
