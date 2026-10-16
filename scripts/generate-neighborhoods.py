@@ -15,7 +15,7 @@ from openpyxl import load_workbook
 
 
 ROOT = Path(__file__).resolve().parents[1]
-BOUNDARIES = ROOT / "frontend" / "src" / "map" / "boundaries.json"
+BOUNDARIES = ROOT / "frontend" / "public" / "data" / "map" / "boundaries.json"
 OUTPUT_JSON = ROOT / "frontend" / "src" / "map" / "neighborhoods.json"
 OUTPUT_SQL = ROOT / "backend" / "src" / "main" / "resources" / "db" / "migration" / "V7__neighborhood_regions.sql"
 

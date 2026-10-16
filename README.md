@@ -67,6 +67,7 @@ chaeummdo/
 ├─ scripts/               # 지도·행정동 데이터 생성 및 API 검증
 ├─ docs/                  # 기획, 디자인, DB, 지도, 검증 문서
 ├─ compose.yaml           # 로컬 PostgreSQL 구성
+├─ compose.production.yaml # 운영 전체 구성
 ├─ SYSTEM.md              # 전체 시스템 명세
 └─ README.md
 ```
@@ -129,6 +130,8 @@ cd ../backend
 
 API 통합 및 브라우저 검증 내역은 [검증 기록](docs/VALIDATION.md)에서 확인할 수 있습니다.
 
+운영 배포는 Docker Compose를 기준으로 준비되어 있습니다. 비밀번호, HTTPS, 볼륨 백업과 배포 후 점검 절차는 [운영 배포 가이드](docs/DEPLOYMENT.md)를 따르세요.
+
 ## 프로젝트 문서
 
 - [제품 요구사항](docs/PRD.md)
@@ -137,6 +140,7 @@ API 통합 및 브라우저 검증 내역은 [검증 기록](docs/VALIDATION.md)
 - [데이터베이스·사진 저장 설계](docs/DATABASE.md)
 - [지도 구현 결정](docs/MAP.md)
 - [검증 기록](docs/VALIDATION.md)
+- [운영 배포 가이드](docs/DEPLOYMENT.md)
 
 ## 현재 범위
 

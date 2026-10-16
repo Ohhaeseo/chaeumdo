@@ -1,5 +1,5 @@
 import { districts, mostRecentTripForRegion, provinces, type Region, type Trip } from "./data";
-import boundaries from "./map/boundaries.json";
+import { useMapBoundaries } from "./mapData";
 
 const points: Record<string, [number, number]> = {
   "11": [202, 145], "26": [408, 455], "27": [360, 354], "28": [138, 168],
@@ -10,7 +10,14 @@ const points: Record<string, [number, number]> = {
 
 const appProvinceId = (boundaryId: string) => boundaryId === "51" ? "42" : boundaryId;
 
+function MapLoadState({ error, retry }: { error: string; retry: () => void }) {
+  if (error) return <div className="map-load-state map-load-error" role="alert"><p>{error}</p><button onClick={retry}>다시 불러오기</button></div>;
+  return <div className="map-load-state" role="status" aria-live="polite"><span className="map-loading-mark" /><p>지도를 불러오고 있어요.</p></div>;
+}
+
 export default function KoreaMap({ trips, onProvince }: { trips: Trip[]; onProvince: (region: Region) => void }) {
+  const { boundaries, error, retry } = useMapBoundaries();
+  if (!boundaries) return <MapLoadState error={error} retry={retry} />;
   const byId = new Map(provinces.map(region => [region.id, region]));
   const provinceTrip = (provinceId: string) => mostRecentTripForRegion(trips, provinceId);
   return <svg className="korea-svg" viewBox="5 0 540 710" role="img" aria-label="대한민국 시·도 여행 지도">
@@ -55,6 +62,8 @@ const seoulLabelPoints: Record<string, [number, number]> = {
 const seoulRiverPath = "M176.6 138.9 C181.8 139.6 185.9 143.1 190.3 144.5 C194.2 145.8 197.0 147.2 201.2 147.0 C205.8 146.8 209.6 145.1 213.0 143.8 C215.1 143.0 217.1 141.8 219.0 140.4";
 
 export function DistrictMap({ province, trips, onDistrict }: { province: Region; trips: Trip[]; onDistrict: (region: Region) => void }) {
+  const { boundaries, error, retry } = useMapBoundaries();
+  if (!boundaries) return <MapLoadState error={error} retry={retry} />;
   const shapes = boundaries.districts.filter(item => appProvinceId(item.province) === province.id);
   const shapeBounds = shapes.map(item => pathBounds(item.path));
   const minX = Math.min(...shapeBounds.map(item => item.x));

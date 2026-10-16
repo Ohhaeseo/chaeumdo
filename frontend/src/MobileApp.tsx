@@ -6,13 +6,12 @@ import KoreaMap, { DistrictMap } from "./KoreaMap";
 import AuthView, { type Account, type AuthScreen } from "./AuthView";
 import TravelForm from "./TravelForm";
 import PlaceMap from "./PlaceMap";
-import boundaries from "./map/boundaries.json";
 import "./styles.css";
 
 type Screen = "map" | "districts" | "my" | "region" | "detail" | "form" | "complete";
 function Header({back,title,menu}:{back:()=>void;title?:string;menu?:()=>void}) {return <header className="inner-header"><button aria-label="뒤로" onClick={back}><ArrowLeft size={22} strokeWidth={1.3}/></button><h1>{title}</h1>{menu?<button aria-label="더보기" onClick={menu}><MoreHorizontal size={22}/></button>:<span/>}</header>;}
 function Attribution() {return <p className="attribution">지도 경계: 국가공간정보포털 · V-World　|　글꼴: S-Core 에스코어 드림</p>;}
-function SplashView(){return <div className="page-canvas"><div className="phone splash-phone"><div className="splash-brand"><h1>채움도</h1><div className="splash-icon" aria-hidden="true"><svg viewBox="0 0 540 710">{Object.values(boundaries.provinces).map((path,i)=><path key={i} d={path} fill="#E5E5E2"/>)}</svg></div></div><Attribution/></div></div>;}
+function SplashView(){return <div className="page-canvas"><div className="phone splash-phone"><div className="splash-brand"><h1>채움도</h1><div className="splash-icon" aria-hidden="true"><MapPin size={38} strokeWidth={1.15}/></div></div><Attribution/></div></div>;}
 function dayDate(start:string,offset:number) {const d=new Date(`${start}T00:00:00Z`);d.setUTCDate(d.getUTCDate()+offset);return `${d.getUTCMonth()+1}/${d.getUTCDate()}`;}
 function withObjectParticle(value:string) {const last=value.charCodeAt(value.length-1);const hasBatchim=last>=0xAC00&&last<=0xD7A3&&(last-0xAC00)%28!==0;return `${value}${hasBatchim?"을":"를"}`;}
 

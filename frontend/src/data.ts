@@ -1,4 +1,4 @@
-import boundaries from "./map/boundaries.json";
+import districtData from "./map/districts.json";
 import neighborhoodData from "./map/neighborhoods.json";
 
 export type Region = {
@@ -66,7 +66,7 @@ export const provinces: Region[] = [
         : "오름을 오르고 바람을 따라 걸으며 나만의 섬 풍경을 담아 보세요.",
 }));
 const appProvinceId = (boundaryId: string) => boundaryId === "51" ? "42" : boundaryId;
-export const districts: Region[] = boundaries.districts.map(item => {
+export const districts: Region[] = districtData.map(item => {
   const parentId = appProvinceId(item.province);
   const province = provinces.find(region => region.id === parentId)!;
   return {

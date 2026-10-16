@@ -3,6 +3,7 @@ dist/
 target/
 *.tsbuildinfo
 .env
+.env.production
 .data/
 backend-starter.zip
 artifacts/

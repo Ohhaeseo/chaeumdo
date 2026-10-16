@@ -7,7 +7,8 @@ from pathlib import Path
 
 root = Path(__file__).resolve().parents[1]
 source = root / "tmp/map"
-out = root / "frontend/src/map/boundaries.json"
+public_out = root / "frontend/public/data/map/boundaries.json"
+metadata_out = root / "frontend/src/map/districts.json"
 
 def xy(pair):
     lon, lat = pair
@@ -48,5 +49,15 @@ def load(name):
 provinces = {f["properties"]["CTPRVN_CD"]:path(f["geometry"]) for f in load("provinces.geojson")}
 districts = [{"id":f["properties"]["SIG_CD"],"name":f["properties"]["SIG_KOR_NM"],"province":f["properties"]["CTPRVN_CD"],"path":path(f["geometry"])} for f in load("districts.geojson")]
 assert len(provinces)==17 and len(districts)==250
-out.write_text(json.dumps({"provinces":provinces,"districts":districts},ensure_ascii=False,separators=(",",":")),encoding="utf-8")
-print(f"Wrote {out} ({out.stat().st_size:,} bytes)")
+public_out.parent.mkdir(parents=True, exist_ok=True)
+public_out.write_text(json.dumps({"provinces":provinces,"districts":districts},ensure_ascii=False,separators=(",",":")),encoding="utf-8")
+metadata_out.write_text(
+    json.dumps(
+        [{key: item[key] for key in ("id", "name", "province")} for item in districts],
+        ensure_ascii=False,
+        separators=(",", ":"),
+    ),
+    encoding="utf-8",
+)
+print(f"Wrote {public_out} ({public_out.stat().st_size:,} bytes)")
+print(f"Wrote {metadata_out} ({metadata_out.stat().st_size:,} bytes)")
