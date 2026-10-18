@@ -180,6 +180,26 @@ export async function deleteLocal(id: string) {
   });
   db.close();
 }
+export class ApiError extends Error {
+  constructor(readonly status: number, message: string) {
+    super(message);
+  }
+}
+// Used when the server sends no message of its own, e.g. validation failures or Nginx 413/429 pages.
+const fallbackMessages: Record<number, string> = {
+  400: "입력 내용을 확인해 주세요.",
+  401: "로그인이 필요해요. 다시 로그인해 주세요.",
+  404: "요청한 정보를 찾지 못했어요.",
+  409: "이미 사용 중인 아이디이거나 계정에 연결된 기록입니다.",
+  413: "사진은 15MB 이하로 선택해 주세요.",
+  429: "잠시 후 다시 시도해 주세요.",
+};
+// The app registers this to return to the login screen when a data request finds the session gone,
+// e.g. after the same account signed in on another device. /auth/ calls report 401 on their own.
+let unauthorizedHandler: (() => void) | null = null;
+export function setUnauthorizedHandler(handler: (() => void) | null) {
+  unauthorizedHandler = handler;
+}
 export async function api<T>(
   path: string,
   options: RequestInit = {},
@@ -189,14 +209,13 @@ export async function api<T>(
     headers: { "X-Requested-With": "chaeummdo", ...options.headers },
   });
   if (!response.ok) {
-    const message: Record<number, string> = {
-      401: "아이디·비밀번호 또는 복구 코드를 확인해 주세요.",
-      404: "입력한 정보로 계정을 찾지 못했어요.",
-      409: "이미 사용 중인 아이디이거나 계정에 연결된 기록입니다.",
-      413: "사진은 15MB 이하로 선택해 주세요.",
-      429: "잠시 후 다시 시도해 주세요.",
-    };
-    throw new Error(message[response.status] ?? "요청을 완료하지 못했어요. 서버 연결과 입력 내용을 확인해 주세요.");
+    let message = fallbackMessages[response.status] ?? "요청을 완료하지 못했어요. 서버 연결과 입력 내용을 확인해 주세요.";
+    try {
+      const body = await response.json() as { message?: unknown };
+      if (typeof body.message === "string" && body.message) message = body.message;
+    } catch { /* not JSON: keep the fallback */ }
+    if (response.status === 401 && !path.startsWith("/auth/")) unauthorizedHandler?.();
+    throw new ApiError(response.status, message);
   }
   const body = await response.text();
   return body ? JSON.parse(body) as T : undefined as T;

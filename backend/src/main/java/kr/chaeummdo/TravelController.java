@@ -1,7 +1,6 @@
 package kr.chaeummdo;
 
 import jakarta.servlet.http.HttpServletRequest;
-import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.*;
 import org.springframework.http.*;
@@ -30,8 +29,8 @@ public class TravelController {
     this.db = db; this.tx = tx; this.session = session; this.root = Path.of(root).toAbsolutePath().normalize();
     Files.createDirectories(this.root);
   }
-  private UUID owner(HttpServletRequest req, HttpServletResponse res) {
-    return session.require(req, res);
+  private UUID owner(HttpServletRequest req) {
+    return session.require(req);
   }
   public record Region(String id, String name, boolean recommended, String introduction, String parentId, String level) {}
   public record Trip(UUID id, String regionId, List<String> regionIds, String photoUrl, LocalDate startDate, LocalDate endDate,
@@ -50,12 +49,12 @@ public class TravelController {
     if (n < 1 || n > 366) throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"여행 기간은 1~366일로 입력해 주세요.");
     return (int)n;
   }
-  @GetMapping("/regions") public List<Region> regions(HttpServletRequest req, HttpServletResponse res) {
-    owner(req,res);
+  // Region data is public reference data; reading it no longer creates a session.
+  @GetMapping("/regions") public List<Region> regions() {
     return db.sql("SELECT id,name,recommended,introduction,parent_id,level FROM region ORDER BY level DESC,parent_id NULLS FIRST,name").query(Region.class).list();
   }
-  @GetMapping("/trips") public List<Trip> trips(HttpServletRequest req, HttpServletResponse res) {
-    UUID user = owner(req,res);
+  @GetMapping("/trips") public List<Trip> trips(HttpServletRequest req) {
+    UUID user = owner(req);
     return db.sql("SELECT * FROM trip WHERE owner_id=:owner ORDER BY start_date DESC,created_at DESC")
       .param("owner",user).query((rs,n) -> readTrip(rs.getObject("id", UUID.class),rs.getString("region_id"),rs.getObject("cover_photo_id",UUID.class),rs.getDate("start_date").toLocalDate(),rs.getDate("end_date").toLocalDate(),rs.getString("companion"))).list();
   }
@@ -164,12 +163,12 @@ public class TravelController {
     }
     return result;
   }
-  @GetMapping("/stats") public Map<String,Object> stats(HttpServletRequest req,HttpServletResponse res) {
+  @GetMapping("/stats") public Map<String,Object> stats(HttpServletRequest req) {
     return db.sql("SELECT (SELECT count(DISTINCT linked.region_id) FROM trip_region linked JOIN trip linked_trip ON linked_trip.id=linked.trip_id WHERE linked_trip.owner_id=:owner) AS regions,count(*) AS trips,coalesce(sum(end_date-start_date+1),0) AS days FROM trip WHERE owner_id=:owner")
-      .param("owner",owner(req,res)).query().singleRow();
+      .param("owner",owner(req)).query().singleRow();
   }
-  @PostMapping("/trips") public Map<String,UUID> create(@Valid @RequestBody TripInput input,HttpServletRequest req,HttpServletResponse res) {
-    UUID user = owner(req,res);
+  @PostMapping("/trips") public Map<String,UUID> create(@Valid @RequestBody TripInput input,HttpServletRequest req) {
+    UUID user = owner(req);
     List<String> regionIds=normalizedRegions(input.regionId(),input.regionIds());
     if(input.days().size()!=duration(input.startDate(),input.endDate())) throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"여행 일수와 DAY 수가 일치하지 않습니다.");
     validatePlacePhotos(input.days(),input.placePhotoIds(),user);
@@ -190,8 +189,8 @@ public class TravelController {
     });
   }
   @PatchMapping("/trips/{id}") public Map<String,UUID> update(@PathVariable UUID id,@Valid @RequestBody TripUpdate input,
-      HttpServletRequest req,HttpServletResponse res) {
-    UUID user=owner(req,res);
+      HttpServletRequest req) {
+    UUID user=owner(req);
     List<String> regionIds=normalizedRegions(input.regionId(),input.regionIds());
     if(input.days().size()!=duration(input.startDate(),input.endDate())) throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"여행 일수와 DAY 수가 일치하지 않습니다.");
     return tx.execute(status->{
@@ -214,8 +213,8 @@ public class TravelController {
       return Map.of("id",id);
     });
   }
-  @DeleteMapping("/trips/{id}") public void delete(@PathVariable UUID id,HttpServletRequest req,HttpServletResponse res) {
-    UUID user=owner(req,res);
+  @DeleteMapping("/trips/{id}") public void delete(@PathVariable UUID id,HttpServletRequest req) {
+    UUID user=owner(req);
     List<String> objectKeys=tx.execute(status->{
       List<UUID> photos=db.sql("""
         SELECT cover_photo_id FROM trip WHERE id=:id AND owner_id=:owner
@@ -244,8 +243,8 @@ public class TravelController {
       catch(IOException ignored) { /* leftover file can be cleaned by media reconciliation */ }
     }
   }
-  @PostMapping("/photos") public Map<String,UUID> upload(@RequestParam("file") MultipartFile file,HttpServletRequest req,HttpServletResponse res) throws IOException {
-    UUID user=owner(req,res);
+  @PostMapping("/photos") public Map<String,UUID> upload(@RequestParam("file") MultipartFile file,HttpServletRequest req) throws IOException {
+    UUID user=owner(req);
     if(file.isEmpty() || file.getSize()>15728640) throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"사진은 15MB 이하로 선택해 주세요.");
     String format; int width; int height;
     try(var stream=ImageIO.createImageInputStream(file.getInputStream())) {
@@ -268,9 +267,12 @@ public class TravelController {
     } catch(Exception e) { Files.deleteIfExists(path); throw e; }
     return Map.of("id",id);
   }
-  @GetMapping("/photos/{id}") public ResponseEntity<org.springframework.core.io.Resource> photo(@PathVariable UUID id,HttpServletRequest req,HttpServletResponse res) {
-    var photo=db.sql("SELECT object_key,content_type FROM photo WHERE id=:id AND owner_id=:owner AND status='READY'").param("id",id).param("owner",owner(req,res)).query().listOfRows().stream().findFirst().orElseThrow(()->new ResponseStatusException(HttpStatus.NOT_FOUND));
+  @GetMapping("/photos/{id}") public ResponseEntity<org.springframework.core.io.Resource> photo(@PathVariable UUID id,HttpServletRequest req) {
+    var photo=db.sql("SELECT object_key,content_type FROM photo WHERE id=:id AND owner_id=:owner AND status='READY'").param("id",id).param("owner",owner(req)).query().listOfRows().stream().findFirst().orElseThrow(()->new ResponseStatusException(HttpStatus.NOT_FOUND));
     var resource=new org.springframework.core.io.FileSystemResource(root.resolve((String)photo.get("object_key")));
-    return ResponseEntity.ok().contentType(MediaType.parseMediaType((String)photo.get("content_type"))).cacheControl(CacheControl.noStore()).header("X-Content-Type-Options","nosniff").body(resource);
+    // A photo id never points at different bytes, so the owner's browser may keep it; Vary keeps it per session.
+    return ResponseEntity.ok().contentType(MediaType.parseMediaType((String)photo.get("content_type")))
+      .cacheControl(CacheControl.maxAge(Duration.ofDays(365)).cachePrivate().immutable()).header("Vary","Cookie")
+      .header("X-Content-Type-Options","nosniff").body(resource);
   }
 }

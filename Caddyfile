@@ -1,0 +1,8 @@
+# Automatic HTTPS: Caddy obtains and renews the certificate for $DOMAIN and redirects HTTP to HTTPS.
+# The domain's DNS must point at this host, and ports 80 and 443 must be reachable from the internet.
+{$DOMAIN} {
+	# The app only works over HTTPS (Secure session cookie), so browsers may remember that.
+	header Strict-Transport-Security "max-age=31536000"
+	# Caddy sends X-Forwarded-For/Proto from the real client; Nginx trusts this Docker-network hop.
+	reverse_proxy frontend:8080
+}

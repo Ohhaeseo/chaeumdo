@@ -1,12 +1,25 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 const base = process.env.API_URL || "http://127.0.0.1:8080/api";
-// Run only against a development DB: this creates one isolated anonymous travel record.
+// Run only against a development DB: this registers two throwaway accounts and deletes them at the end.
 const init = await fetch(base + "/regions");
 assert.equal(init.status, 200);
 assert.equal((await init.json()).length, 3894);
-const cookie = init.headers.get("set-cookie").split(";")[0];
+assert.equal(init.headers.get("set-cookie"), null, "reading regions must not create a session");
+const password = "Test-password-2026";
+const register = async () => {
+  const username = `test_${crypto.randomUUID().replaceAll("-", "").slice(0, 12)}`;
+  const response = await fetch(base + "/auth/register", {
+    method: "POST",
+    headers: { "X-Requested-With": "chaeummdo", "Content-Type": "application/json" },
+    body: JSON.stringify({ username, displayName: "검증", password }),
+  });
+  assert.equal(response.status, 200);
+  return response.headers.get("set-cookie").split(";")[0];
+};
+const cookie = await register();
 const headers = { Cookie: cookie, "X-Requested-With": "chaeummdo" };
+const otherHeaders = { Cookie: await register(), "X-Requested-With": "chaeummdo" };
 const picture = await readFile(
   new URL(
     "../frontend/public/fonts/에스코어 드림_라이선스.png",
@@ -23,13 +36,18 @@ const upload = await fetch(base + "/photos", {
 assert.equal(upload.status, 200);
 const { id: photoId } = await upload.json();
 assert.equal(
-  (await fetch(base + "/photos/" + photoId, { headers })).status,
-  200,
+  (await fetch(base + "/photos", { method: "POST", headers: { "X-Requested-With": "chaeummdo" }, body: form })).status,
+  401,
+  "uploads require an account",
 );
+const ownPhoto = await fetch(base + "/photos/" + photoId, { headers });
+assert.equal(ownPhoto.status, 200);
+assert.match(ownPhoto.headers.get("cache-control"), /private.*immutable|immutable.*private/);
+assert.equal((await fetch(base + "/photos/" + photoId)).status, 401);
 assert.equal(
-  (await fetch(base + "/photos/" + photoId)).status,
+  (await fetch(base + "/photos/" + photoId, { headers: otherHeaders })).status,
   404,
-  "another traveler must not read photo",
+  "another account must not read photo",
 );
 const payload = {
   requestId: crypto.randomUUID(),
@@ -89,23 +107,20 @@ const cleared = await (await fetch(base + "/trips", { headers })).json();
 assert.equal(cleared[0].placePhotoUrls[0][0], null);
 const otherUpdate = await fetch(base + "/trips/" + list[0].id, {
   method: "PATCH",
-  headers: { "X-Requested-With": "chaeummdo", "Content-Type": "application/json" },
+  headers: { ...otherHeaders, "Content-Type": "application/json" },
   body: JSON.stringify({ ...payload, photoId: undefined, placePhotoIds: undefined }),
 });
 assert.equal(otherUpdate.status, 404);
 assert.equal((await create({ ...payload, requestId: crypto.randomUUID(), placePhotoIds: [[]] })).status, 400);
 assert.equal((await create({ ...payload, requestId: crypto.randomUUID(), regionIds: ["1111053000", "1111051500"] })).status, 400);
 assert.equal((await create({ ...payload, requestId: crypto.randomUUID(), placeLocations: [[{ latitude: 999, longitude: 126, address: "", source: "OpenStreetMap", sourceId: "bad" }], [], [null]] })).status, 400);
-assert.equal(
-  (
-    await create({
-      ...payload,
-      requestId: crypto.randomUUID(),
-      endDate: "2024-02-27",
-    })
-  ).status,
-  400,
-);
+const reversed = await create({
+  ...payload,
+  requestId: crypto.randomUUID(),
+  endDate: "2024-02-27",
+});
+assert.equal(reversed.status, 400);
+assert.deepEqual(await reversed.json(), { status: 400, message: "여행 기간은 1~366일로 입력해 주세요." }, "server reason reaches the app");
 assert.equal(
   (await create({ ...payload, requestId: crypto.randomUUID(), days: [] }))
     .status,
@@ -119,7 +134,7 @@ const noOwner = await fetch(base + "/trips", {
   },
   body: JSON.stringify({ ...payload, requestId: crypto.randomUUID() }),
 });
-assert.equal(noOwner.status, 400);
+assert.equal(noOwner.status, 401);
 const noHeader = await fetch(base + "/trips", {
   method: "POST",
   headers: { Cookie: cookie, "Content-Type": "application/json" },
@@ -128,7 +143,7 @@ const noHeader = await fetch(base + "/trips", {
 assert.equal(noHeader.status, 403);
 const otherDelete = await fetch(base + "/trips/" + list[0].id, {
   method: "DELETE",
-  headers: { "X-Requested-With": "chaeummdo" },
+  headers: otherHeaders,
 });
 assert.equal(otherDelete.status, 404);
 const deleteNoHeader = await fetch(base + "/trips/" + list[0].id, {
@@ -144,6 +159,14 @@ assert.equal(deleted.status, 200);
 assert.equal((await (await fetch(base + "/trips", { headers })).json()).length, 0);
 assert.equal((await fetch(base + "/photos/" + photoId, { headers })).status, 404);
 assert.deepEqual(await (await fetch(base + "/stats", { headers })).json(), { regions: 0, trips: 0, days: 0 });
+for (const accountHeaders of [headers, otherHeaders]) {
+  const removed = await fetch(base + "/auth/delete", {
+    method: "POST",
+    headers: { ...accountHeaders, "Content-Type": "application/json" },
+    body: JSON.stringify({ password }),
+  });
+  assert.equal(removed.status, 200);
+}
 console.log(
-  "PASS: 17 provinces + 250 districts + 3,627 neighborhoods, 10-digit multi-region trips, upload/read, owner isolation, place photo/location save/retain/remove, atomic retry, create/update/delete, stats, invalid dates/day count, request header protection",
+  "PASS: public regions without session, 17 provinces + 250 districts + 3,627 neighborhoods, 10-digit multi-region trips, account-only upload/read, private photo cache, owner isolation, place photo/location save/retain/remove, atomic retry, create/update/delete, stats, invalid dates/day count, request header protection, JSON error message",
 );

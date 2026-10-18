@@ -3,6 +3,7 @@ import { ArrowLeft, ImagePlus, LoaderCircle, MapPin, Plus, Search, X } from "luc
 import { api, districts, neighborhoods, provinceIdForRegion, provinces, regionById, regionIdsForTrip, saveLocal, type PlaceLocation, type Region, type Trip } from "./data";
 import { inclusiveDays } from "./dates.mjs";
 import { searchPlaces, type PlaceSearchResult } from "./placeSearch";
+import { preparePhoto } from "./photo";
 
 type PlacePhoto = File | string | null;
 type PlaceRow = { name: string; photo: PlacePhoto; location: PlaceLocation | null };
@@ -88,7 +89,7 @@ function PlaceSearchPicker({ value, location, day, index, onNameChange, onSelect
 
 async function uploadPhoto(file: File): Promise<string> {
   const form = new FormData();
-  form.append("file", file);
+  form.append("file", await preparePhoto(file));
   return (await api<{ id: string }>("/photos", { method: "POST", body: form })).id;
 }
 
@@ -254,12 +255,18 @@ export default function TravelForm({ region, trip, mode, onBack, onSaved }: {
     setBusy(true);
     try {
       if (mode === "demo") {
-        const cover = file || await (await fetch(trip!.photoUrl)).blob();
-        const photos = await Promise.all(rows.map(day => Promise.all(day.map(async row => {
-          if (row.photo instanceof File) return row.photo;
-          if (typeof row.photo === "string") return (await fetch(row.photo)).blob();
-          return null;
-        }))));
+        const cover = file ? await preparePhoto(file) : await (await fetch(trip!.photoUrl)).blob();
+        // One photo at a time keeps decoding memory low on phones.
+        const photos: (Blob | null)[][] = [];
+        for (const day of rows) {
+          const photoDay: (Blob | null)[] = [];
+          for (const row of day) {
+            if (row.photo instanceof File) photoDay.push(await preparePhoto(row.photo));
+            else if (typeof row.photo === "string") photoDay.push(await (await fetch(row.photo)).blob());
+            else photoDay.push(null);
+          }
+          photos.push(photoDay);
+        }
         await saveLocal(next, cover, photos);
       } else {
         const photoId = file ? await uploadPhoto(file) : undefined;
@@ -295,7 +302,7 @@ export default function TravelForm({ region, trip, mode, onBack, onSaved }: {
         {selectedRegions.length > 0 && <ol className="selected-region-list">{selectedRegions.map((item, index) => <li key={item.id}><span>{index + 1}</span><b>{item.fullName}</b><button type="button" aria-label={`${item.fullName} 삭제`} onClick={() => setRegionIds(previous => previous.filter(id => id !== item.id))}><X size={14} /></button></li>)}</ol>}
       </section>
       <div className="region-selects">
-        <label className="region-select-label">시·도<select aria-label="시·도" value={provinceId} required onChange={event => { setProvinceId(event.target.value); setDistrictId(""); setNeighborhoodId(""); setError(""); }}><option value="">시·도를 선택해 주세요</option>{provinces.map(item => <option key={item.id} value={item.id}>{item.fullName}</option>)}</select></label>
+        <label className="region-select-label">시·도<select aria-label="시·도" value={provinceId} onChange={event => { setProvinceId(event.target.value); setDistrictId(""); setNeighborhoodId(""); setError(""); }}><option value="">시·도를 선택해 주세요</option>{provinces.map(item => <option key={item.id} value={item.id}>{item.fullName}</option>)}</select></label>
         <label className="region-select-label">시·군·구<select aria-label="시·군·구" value={districtId} disabled={!provinceId} onChange={event => { setDistrictId(event.target.value); setNeighborhoodId(""); setError(""); }}><option value="">시·군·구 전체</option>{districts.filter(item => item.parentId === provinceId).map(item => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
         <label className="region-select-label neighborhood-select">읍·면·동<select aria-label="읍·면·동" value={neighborhoodId} disabled={!districtId} onChange={event => { setNeighborhoodId(event.target.value); setError(""); }}><option value="">읍·면·동 전체</option>{neighborhoods.filter(item => item.parentId === districtId).map(item => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
       </div>

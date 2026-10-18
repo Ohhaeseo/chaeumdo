@@ -17,7 +17,6 @@ import org.springframework.web.server.ResponseStatusException;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -55,32 +54,49 @@ public class AccountController {
   @PostMapping("/register") public Map<String,String> register(@Valid @RequestBody Registration input,
                                           HttpServletRequest req,HttpServletResponse res) {
     session.checkMutation(req);
-    UUID owner = session.require(req,res);
+    var anonymous = session.existing(req);
     String username = input.username().toLowerCase(java.util.Locale.ROOT);
     String code = session.newToken();
     try {
-      int updated = db.sql("UPDATE traveler SET username=:username,display_name=:name,password_hash=:password,recovery_code_hash=:recovery WHERE id=:id AND username IS NULL")
-        .param("username",username).param("name",input.displayName().trim())
-        .param("password",passwords.encode(input.password()))
-        .param("recovery",TravelerSession.hash(code)).param("id",owner).update();
-      if(updated==0) throw new ResponseStatusException(HttpStatus.CONFLICT,"이미 계정에 연결된 기록입니다.");
+      if(anonymous.isPresent()) {
+        // Sessions from before accounts were required keep their records by upgrading in place.
+        int updated = db.sql("UPDATE traveler SET username=:username,display_name=:name,password_hash=:password,recovery_code_hash=:recovery WHERE id=:id AND username IS NULL")
+          .param("username",username).param("name",input.displayName().trim())
+          .param("password",passwords.encode(input.password()))
+          .param("recovery",TravelerSession.hash(code)).param("id",anonymous.get()).update();
+        if(updated==0) throw new ResponseStatusException(HttpStatus.CONFLICT,"이미 계정에 연결된 기록입니다.");
+      } else {
+        String token = session.newToken();
+        db.sql("INSERT INTO traveler(id,access_token_hash,username,display_name,password_hash,recovery_code_hash) VALUES(:id,:token,:username,:name,:password,:recovery)")
+          .param("id",UUID.randomUUID()).param("token",TravelerSession.hash(token))
+          .param("username",username).param("name",input.displayName().trim())
+          .param("password",passwords.encode(input.password()))
+          .param("recovery",TravelerSession.hash(code)).update();
+        session.setCookie(req,res,token);
+      }
     } catch(DuplicateKeyException e) { throw new ResponseStatusException(HttpStatus.CONFLICT,"이미 사용 중인 아이디입니다."); }
     return Map.of("username",username,"displayName",input.displayName().trim(),"recoveryCode",code);
   }
   @PostMapping("/login") public Account login(@Valid @RequestBody Credentials input,
                                        HttpServletRequest req,HttpServletResponse res) {
     session.checkMutation(req);
-    var rows=db.sql("SELECT id,username,display_name,password_hash,failed_attempts,locked_until FROM traveler WHERE lower(username)=lower(:username)")
+    // The lock is compared in SQL: the JDBC row holds a java.sql.Timestamp, and the lock math uses the DB clock too.
+    var rows=db.sql("SELECT id,username,display_name,password_hash,coalesce(locked_until > now(),false) AS locked FROM traveler WHERE lower(username)=lower(:username)")
       .param("username",input.username()).query().listOfRows();
     if(rows.isEmpty()) throw new ResponseStatusException(HttpStatus.UNAUTHORIZED,"아이디 또는 비밀번호를 확인해 주세요.");
     var row=rows.getFirst();
     UUID id=(UUID)row.get("id");
-    OffsetDateTime locked=(OffsetDateTime)row.get("locked_until");
-    if(locked!=null && locked.isAfter(OffsetDateTime.now()))
+    if(Boolean.TRUE.equals(row.get("locked")))
       throw new ResponseStatusException(HttpStatus.TOO_MANY_REQUESTS,"잠시 후 다시 로그인해 주세요.");
     if(!passwords.matches(input.password(),(String)row.get("password_hash"))) {
-      db.sql("UPDATE traveler SET failed_attempts=CASE WHEN locked_until IS NOT NULL AND locked_until < now() THEN 1 ELSE failed_attempts+1 END, locked_until=CASE WHEN failed_attempts>=4 THEN now()+interval '15 minutes' ELSE NULL END WHERE id=:id")
-        .param("id",id).update();
+      // SET expressions read the old row, so the lock decision repeats the new attempt count instead of reading failed_attempts.
+      db.sql("""
+        UPDATE traveler SET
+          failed_attempts=CASE WHEN locked_until IS NOT NULL AND locked_until < now() THEN 1 ELSE failed_attempts+1 END,
+          locked_until=CASE WHEN (CASE WHEN locked_until IS NOT NULL AND locked_until < now() THEN 1 ELSE failed_attempts+1 END)>=5
+            THEN now()+interval '15 minutes' ELSE NULL END
+        WHERE id=:id
+        """).param("id",id).update();
       throw new ResponseStatusException(HttpStatus.UNAUTHORIZED,"아이디 또는 비밀번호를 확인해 주세요.");
     }
     db.sql("UPDATE traveler SET failed_attempts=0,locked_until=NULL WHERE id=:id").param("id",id).update();

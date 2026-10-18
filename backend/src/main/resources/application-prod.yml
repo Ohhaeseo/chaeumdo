@@ -2,12 +2,6 @@ server:
   address: 0.0.0.0
   forward-headers-strategy: framework
   shutdown: graceful
-  servlet:
-    session:
-      cookie:
-        secure: true
-        http-only: true
-        same-site: strict
 spring:
   datasource:
     url: ${DB_URL}
@@ -27,3 +21,4 @@ management:
       show-details: never
 app:
   media-root: ${MEDIA_ROOT:/app/data/media}
+  secure-cookies: true
