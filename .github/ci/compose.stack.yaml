@@ -1,0 +1,13 @@
+# CI override for compose.production.yaml: reuse the images the job already built and keep Caddy
+# on loopback, non-standard ports with DOMAIN=localhost (Caddy's internal CA instead of ACME).
+# Local run from the repository root:
+#   docker compose -p chaeummdo-ci --env-file .github/ci/stack.env -f compose.production.yaml -f .github/ci/compose.stack.yaml up -d --build --wait
+services:
+  backend:
+    image: chaeummdo-backend:ci
+  frontend:
+    image: chaeummdo-frontend:ci
+  caddy:
+    ports: !override
+      - "127.0.0.1:8088:80"
+      - "127.0.0.1:8443:443"

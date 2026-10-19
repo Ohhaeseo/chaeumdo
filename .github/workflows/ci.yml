@@ -1,0 +1,195 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  frontend:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - run: npm test
+      - run: npm run build
+
+  backend:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: 21
+          cache: maven
+          cache-dependency-path: backend/pom.xml
+      - run: ./mvnw -B -ntp test
+
+  integration:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_DB: chaeummdo
+          POSTGRES_USER: chaeummdo
+          POSTGRES_PASSWORD: ci-only-password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U chaeummdo -d chaeummdo"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      API_URL: http://127.0.0.1:8080/api
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: 21
+          cache: maven
+          cache-dependency-path: backend/pom.xml
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - name: Build backend jar
+        working-directory: backend
+        run: ./mvnw -B -ntp package -DskipTests
+      - name: Start backend (prod profile)
+        env:
+          SPRING_PROFILES_ACTIVE: prod
+          DB_URL: jdbc:postgresql://127.0.0.1:5432/chaeummdo
+          DB_USER: chaeummdo
+          DB_PASSWORD: ci-only-password
+          MEDIA_ROOT: ${{ runner.temp }}/media
+        run: |
+          mkdir -p "$MEDIA_ROOT"
+          java -jar backend/target/chaeummdo-*.jar > "$RUNNER_TEMP/backend.log" 2>&1 &
+          echo $! > "$RUNNER_TEMP/backend.pid"
+      - name: Wait for /api/regions
+        run: |
+          for second in $(seq 1 120); do
+            if curl -fsS -o /dev/null "$API_URL/regions"; then
+              echo "Backend answered after ${second}s"
+              exit 0
+            fi
+            if ! kill -0 "$(cat "$RUNNER_TEMP/backend.pid")" 2>/dev/null; then
+              echo "::error::Backend exited during startup"
+              cat "$RUNNER_TEMP/backend.log"
+              exit 1
+            fi
+            sleep 1
+          done
+          echo "::error::Backend did not answer $API_URL/regions within 120s"
+          tail -n 200 "$RUNNER_TEMP/backend.log"
+          exit 1
+      - run: node scripts/smoke-api.mjs
+      - run: node scripts/smoke-account.mjs
+      - name: Backend log
+        if: failure()
+        run: cat "$RUNNER_TEMP/backend.log"
+
+  containers:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      # Used only by the full-stack steps; the config checks pass their own -f and --env-file.
+      COMPOSE_PROJECT_NAME: chaeummdo-ci
+      COMPOSE_FILE: compose.production.yaml:.github/ci/compose.stack.yaml
+      STACK_ENV: .github/ci/stack.env
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - name: Build backend image
+        run: docker build --progress=plain -t chaeummdo-backend:ci backend
+      - name: Build frontend image
+        run: docker build --progress=plain -t chaeummdo-frontend:ci frontend
+      - name: nginx -t
+        # nginx resolves proxy_pass hosts at load time, so the compose service name must resolve.
+        run: docker run --rm --add-host backend:127.0.0.1 chaeummdo-frontend:ci nginx -t
+      - name: caddy validate
+        run: >-
+          docker run --rm --env-file .env.production.example
+          -v "$PWD/Caddyfile:/etc/caddy/Caddyfile:ro"
+          caddy:2-alpine caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
+      - name: compose config
+        run: |
+          docker compose -f compose.production.yaml --env-file .env.production.example config --quiet
+          # Without the required variables compose must refuse to start.
+          if POSTGRES_PASSWORD=set-only-for-this-check docker compose -f compose.production.yaml --env-file /dev/null config --quiet 2> "$RUNNER_TEMP/missing.log"; then
+            echo "::error::compose.production.yaml accepted a missing DOMAIN"
+            exit 1
+          fi
+          grep "DOMAIN is required" "$RUNNER_TEMP/missing.log" || {
+            echo "::error::compose failed for another reason:"
+            cat "$RUNNER_TEMP/missing.log"
+            exit 1
+          }
+      - name: Start production stack (Caddy on localhost:8443)
+        run: docker compose --env-file "$STACK_ENV" up -d --no-build --wait --wait-timeout 300
+      - name: Wait for Caddy and trust its local CA
+        run: |
+          ca="$RUNNER_TEMP/caddy-root.crt"
+          for second in $(seq 1 60); do
+            if docker compose --env-file "$STACK_ENV" cp caddy:/data/caddy/pki/authorities/local/root.crt "$ca" 2>/dev/null &&
+              curl -fsS --cacert "$ca" -o /dev/null https://localhost:8443/healthz; then
+              echo "NODE_EXTRA_CA_CERTS=$ca" >> "$GITHUB_ENV"
+              echo "Caddy answered after ${second}s"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "::error::Caddy did not serve https://localhost:8443/healthz within 60s"
+          # Repeat both probes with their errors visible.
+          docker compose --env-file "$STACK_ENV" cp caddy:/data/caddy/pki/authorities/local/root.crt "$ca" || true
+          curl -sSv --cacert "$ca" -o /dev/null https://localhost:8443/healthz || true
+          exit 1
+      - name: gzip and cache headers through Caddy
+        run: node scripts/smoke-stack.mjs
+      - name: API smoke through Caddy and Nginx
+        env:
+          API_URL: https://localhost:8443/api
+        run: node scripts/smoke-api.mjs
+      - name: Stack status and logs
+        if: failure()
+        run: |
+          docker compose --env-file "$STACK_ENV" ps -a
+          docker compose --env-file "$STACK_ENV" logs --no-color
+      - name: Stop stack
+        if: always()
+        run: docker compose --env-file "$STACK_ENV" down -v

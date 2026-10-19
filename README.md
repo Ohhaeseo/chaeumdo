@@ -130,6 +130,19 @@ cd ../backend
 
 API 통합 및 브라우저 검증 내역은 [검증 기록](docs/VALIDATION.md)에서 확인할 수 있습니다.
 
+### CI
+
+`main` 푸시와 PR마다 GitHub Actions([`ci.yml`](.github/workflows/ci.yml))가 아래 네 작업을 서로 독립적으로 실행합니다.
+
+| 작업 | 하는 일 |
+| --- | --- |
+| `frontend` | Node 22에서 `npm ci`, `npm test`, `npm run build` |
+| `backend` | Temurin 21에서 `./mvnw -B test` |
+| `integration` | PostgreSQL 17 서비스 컨테이너에 백엔드 jar를 운영 프로필로 띄우고 `smoke-api.mjs`, `smoke-account.mjs` 실행 |
+| `containers` | 백엔드·프론트 이미지 빌드, `nginx -t`, `caddy validate`, `compose config` 확인 후 운영 compose 전체를 `localhost:8443`에 띄워 `smoke-stack.mjs`(Caddy 뒤 gzip, `index.html` `no-cache`, HTTPS 이동)와 `smoke-api.mjs` 실행 |
+
+같은 전체 스택 검사를 로컬에서 돌리는 명령은 [`.github/ci/compose.stack.yaml`](.github/ci/compose.stack.yaml) 머리말에 있습니다.
+
 운영 배포는 Docker Compose를 기준으로 준비되어 있습니다. 비밀번호, HTTPS, 볼륨 백업과 배포 후 점검 절차는 [운영 배포 가이드](docs/DEPLOYMENT.md)를 따르세요.
 
 ## 프로젝트 문서
