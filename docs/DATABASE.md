@@ -10,6 +10,7 @@
 
 ```mermaid
 erDiagram
+  traveler ||--o{ traveler_session : "signs in"
   traveler ||--o{ trip : owns
   traveler ||--o{ photo : owns
   region ||--o{ trip_region : links
@@ -22,7 +23,8 @@ erDiagram
 
 | 테이블 | 책임과 핵심 필드 |
 |---|---|
-| traveler | UUID, 세션 토큰 해시, 아이디·표시 이름·BCrypt 비밀번호·복구 코드 해시, 로그인 실패 잠금, 생성 시각 |
+| traveler | UUID, 아이디·표시 이름·BCrypt 비밀번호·복구 코드 해시, 로그인 실패 잠금, 생성 시각. `access_token_hash`는 V8부터 쓰지 않는 빈 컬럼 |
+| traveler_session | 세션 토큰 SHA-256 해시(PK), 소유 traveler(삭제 시 CASCADE), 생성·최근 사용·만료 시각. 로그인한 기기마다 한 행 |
 | region | 내부 지역 코드, 이름, 지도 키, 정적 추천/소개 |
 | trip | 소유자, 대표 지역, 대표 사진, 시작·종료 DATE, 동행인, 멱등 요청 키 |
 | trip_region | 여행 ID + 지역 ID, 여행 중 방문 순서(0~9) |
@@ -33,7 +35,17 @@ erDiagram
 
 지역은 `province`, `district`, `neighborhood` 3단계 계층으로 저장한다. 시·도는 기존 2자리 내부 코드, 시·군·구는 5자리 경계 코드, 읍·면·동은 10자리 행정동 코드를 사용하며 `parent_id`로 바로 위 단계에 연결한다. V7은 기존 키를 보존하면서 지역 외래 키를 10자리로 확장하고 2026-03-25 시행본 행정 읍·면·동 3,627개를 추가한다.
 
-실행 가능한 정의: `backend/src/main/resources/db/migration/V1__travel_schema.sql`부터 `V7__neighborhood_regions.sql`까지다. V5는 기존 `trip.region_id`를 `trip_region`의 첫 지역으로 이관하고, 이후 한 여행에 최대 10개 지역을 순서대로 연결한다. V6는 장소에 선택적 좌표·주소·출처 식별자를 추가하고 좌표 쌍과 범위를 제약한다. V7은 읍·면·동 계층과 10자리 지역 키를 추가한다. 아이디는 대소문자를 구분하지 않는 고유 인덱스, 복구 코드 해시는 고유 인덱스로 보호한다. 익명 traveler 행은 계정 필수화 이전 세션의 가입 시 기록 승계를 위해 남기며, 새 익명 행은 더 이상 만들지 않는다. 로그인 잠금 여부는 DB 시각 기준(`locked_until > now()`)으로 판단한다. 장소 사진은 기존 `photo` 저장소를 재사용하며 `(photo_id, owner_id)` 복합 외래 키로 타인 사진 연결을 막는다. 한 장소에는 현재 사진 한 장을 연결할 수 있다.
+실행 가능한 정의: `backend/src/main/resources/db/migration/V1__travel_schema.sql`부터 `V8__traveler_sessions.sql`까지다. V5는 기존 `trip.region_id`를 `trip_region`의 첫 지역으로 이관하고, 이후 한 여행에 최대 10개 지역을 순서대로 연결한다. V6는 장소에 선택적 좌표·주소·출처 식별자를 추가하고 좌표 쌍과 범위를 제약한다. V7은 읍·면·동 계층과 10자리 지역 키를 추가한다. V8은 아래 [세션](#세션)을 기기별 행으로 나눈다. 아이디는 대소문자를 구분하지 않는 고유 인덱스, 복구 코드 해시는 고유 인덱스로 보호한다. 익명 traveler 행은 계정 필수화 이전 세션의 가입 시 기록 승계를 위해 남기며, 새 익명 행은 더 이상 만들지 않는다. 로그인 잠금 여부는 DB 시각 기준(`locked_until > now()`)으로 판단한다. 장소 사진은 기존 `photo` 저장소를 재사용하며 `(photo_id, owner_id)` 복합 외래 키로 타인 사진 연결을 막는다. 한 장소에는 현재 사진 한 장을 연결할 수 있다.
+
+## 세션
+
+V7까지는 `traveler.access_token_hash`(NOT NULL UNIQUE) 한 칸이 세션이었다. 그래서 로그인할 때마다 값을 덮어써 다른 기기가 로그아웃됐다. V8은 `traveler_session`을 만들고 기존 해시를 모두 옮긴다. 익명 레거시 행의 해시도 함께 옮기므로, 그 세션으로 가입하면 기존처럼 같은 행이 계정이 된다.
+
+- 옮긴 세션은 발급 시각을 알 수 없어 V8 적용 시점부터 30일을 준다. 브라우저 쿠키도 발급 후 30일이면 사라지므로 실제 수명은 이보다 길어지지 않는다.
+- `traveler.access_token_hash`는 NOT NULL을 풀고 값을 비운다. 컬럼은 남기므로 V8 뒤에 이전 백엔드 이미지로 되돌려도 서버가 뜨고 로그인·가입도 된다. 다만 모두 다시 로그인해야 하고, 되돌린 동안 생긴 세션은 다시 V8 백엔드로 올리면 끊긴다. 값을 남기지 않는 이유는, 남겨 두면 롤백 시 로그아웃했거나 비밀번호 재설정으로 끊은 토큰이 다시 살아나기 때문이다. 새 코드가 안정되면 다음 마이그레이션에서 컬럼을 삭제한다.
+- 조회는 `token_hash` PK로 하고 `expires_at > now()`를 함께 검사한다. 계정 전용 API는 `username IS NOT NULL`도 확인한다. 모든 세션 삭제와 CASCADE는 `traveler_id` 인덱스를 쓴다.
+- `last_used_at`은 1시간보다 오래됐을 때만 갱신한다. 사진 조회처럼 잦은 GET이 매번 쓰기가 되지 않게 하기 위해서다. 그래서 값은 최대 1시간 늦을 수 있다.
+- 만료된 행은 그 계정이 다시 로그인할 때 지운다. 오래 접속하지 않은 계정의 만료 행은 남지만 인증에는 쓰이지 않는다. 일괄 정리 작업은 아직 없다.
 
 ## 무결성과 조회
 
