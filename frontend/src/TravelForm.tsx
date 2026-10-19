@@ -3,7 +3,7 @@ import { ArrowLeft, ImagePlus, LoaderCircle, MapPin, Plus, Search, X } from "luc
 import { api, districts, neighborhoods, provinceIdForRegion, provinces, regionById, regionIdsForTrip, saveLocal, type PlaceLocation, type Region, type Trip } from "./data";
 import { inclusiveDays } from "./dates.mjs";
 import { searchPlaces, type PlaceSearchResult } from "./placeSearch";
-import { preparePhoto } from "./photo";
+import { preparePhoto, prepareThumbnail } from "./photo";
 
 type PlacePhoto = File | string | null;
 type PlaceRow = { name: string; photo: PlacePhoto; location: PlaceLocation | null };
@@ -256,18 +256,33 @@ export default function TravelForm({ region, trip, mode, onBack, onSaved }: {
     try {
       if (mode === "demo") {
         const cover = file ? await preparePhoto(file) : await (await fetch(trip!.photoUrl)).blob();
+        // A record saved before thumbnails has one URL for both, so it gets its thumbnail now.
+        const thumbnail = !file && trip!.thumbnailUrl !== trip!.photoUrl
+          ? await (await fetch(trip!.thumbnailUrl)).blob()
+          : await prepareThumbnail(cover);
+        // Kept place photos come back as URLs and may have moved, so their thumbnails are found by URL.
+        const savedThumbnails = new Map<string, string>();
+        trip?.placePhotoUrls?.forEach((day, i) => day.forEach((url, j) => {
+          const thumbnailUrl = trip.placePhotoThumbnailUrls?.[i]?.[j];
+          if (url && thumbnailUrl && thumbnailUrl !== url) savedThumbnails.set(url, thumbnailUrl);
+        }));
         // One photo at a time keeps decoding memory low on phones.
         const photos: (Blob | null)[][] = [];
+        const thumbnails: (Blob | null)[][] = [];
         for (const day of rows) {
           const photoDay: (Blob | null)[] = [];
+          const thumbnailDay: (Blob | null)[] = [];
           for (const row of day) {
-            if (row.photo instanceof File) photoDay.push(await preparePhoto(row.photo));
-            else if (typeof row.photo === "string") photoDay.push(await (await fetch(row.photo)).blob());
-            else photoDay.push(null);
+            const placePhoto = row.photo instanceof File ? await preparePhoto(row.photo)
+              : typeof row.photo === "string" ? await (await fetch(row.photo)).blob() : null;
+            const savedThumbnail = typeof row.photo === "string" ? savedThumbnails.get(row.photo) : undefined;
+            photoDay.push(placePhoto);
+            thumbnailDay.push(!placePhoto ? null : savedThumbnail ? await (await fetch(savedThumbnail)).blob() : await prepareThumbnail(placePhoto));
           }
           photos.push(photoDay);
+          thumbnails.push(thumbnailDay);
         }
-        await saveLocal(next, cover, photos);
+        await saveLocal(next, cover, thumbnail, photos, thumbnails);
       } else {
         const photoId = file ? await uploadPhoto(file) : undefined;
         const placePhotoIds: (string | null)[][] = [];

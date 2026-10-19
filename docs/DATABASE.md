@@ -31,7 +31,7 @@ erDiagram
 | trip_day | 여행 ID + DAY 번호 복합 키 |
 | trip_place | 여행 ID + DAY 번호 + 순번, 장소명, 선택적 장소 사진 ID·위도·경도·주소·OpenStreetMap 출처 ID, 소유자 ID |
 | photo | 소유자, object_key, MIME, 바이트, 가로·세로, 처리 상태 |
-| photo_variant | 사진 ID + THUMBNAIL/DISPLAY, 파생 파일 키와 크기 |
+| photo_variant | 사진 ID + THUMBNAIL/DISPLAY, 파생 파일 키와 크기. 현재는 업로드 때 THUMBNAIL만 만든다 |
 
 지역은 `province`, `district`, `neighborhood` 3단계 계층으로 저장한다. 시·도는 기존 2자리 내부 코드, 시·군·구는 5자리 경계 코드, 읍·면·동은 10자리 행정동 코드를 사용하며 `parent_id`로 바로 위 단계에 연결한다. V7은 기존 키를 보존하면서 지역 외래 키를 10자리로 확장하고 2026-03-25 시행본 행정 읍·면·동 3,627개를 추가한다.
 
@@ -57,10 +57,22 @@ V7까지는 `traveler.access_token_hash`(NOT NULL UNIQUE) 한 칸이 세션이�
 - `(owner_id, created_at DESC, id)`는 향후 cursor 조회용이다.
 - 미참조 정리는 `(status, created_at)`와 trip의 cover_photo_id 인덱스를 사용한다.
 - 기록 삭제는 트랜잭션 안에서 소유자를 확인하고 연결 사진 후보를 수집한다. 삭제 후 다른 기록·장소가 참조하지 않는 사진 행과 variant만 제거하며 저장소 파일은 커밋 뒤 최선 노력으로 정리한다.
+- 계정 삭제는 소유자의 photo와 photo_variant 파일 키를 함께 모은 뒤 행을 지우고(variant 행은 FK cascade), 커밋 뒤 원본과 썸네일 파일을 지운다.
 - 통계: `trip_region`의 고유 지역 수, `trip` 수, `sum(end_date - start_date + 1)`을 각각 계산해 다중 지역 때문에 여행 횟수·일수가 중복되지 않게 한다.
 - timestamps는 TIMESTAMPTZ, 여행 날짜는 DATE. 사용자 화면은 날짜를 시간대로 변환하지 않는다.
 
 현재 API는 MVP 전체 목록을 반환한다. 기록량이 커지면 먼저 cursor 페이지네이션과 DAY 일괄 조회를 도입한다. 사진이 많다는 이유만으로 DB 샤딩·파티셔닝을 시작하지 않는다.
+
+## 썸네일 — 구현
+
+지도와 기록 카드가 2048px 원본을 내려받지 않도록 2026-10-19에 THUMBNAIL 변형을 실제로 쓰기 시작했다. 스키마 변경은 없다(V1의 `photo_variant`).
+
+- `POST /api/photos`는 원본을 재인코딩한 뒤 같은 요청 안에서 긴 변 320px 썸네일을 만든다. 원본이 더 작으면 늘리지 않고 같은 크기로 둔다. photo와 photo_variant 행은 한 트랜잭션으로 저장하고, 실패하면 두 파일을 모두 지운다.
+- 키는 `{owner}/{photo}-thumbnail.{jpeg|png}`이다. 원본과 같은 형식으로 저장하므로 조회 때 `photo.content_type`을 같이 쓴다. 웹은 항상 JPEG를 올리고, 다른 클라이언트의 PNG는 투명도를 유지한다.
+- 축소는 절반씩 단계적으로 줄이며 bilinear 보간을 쓴다. 2048→320을 한 번에 줄이면 보간이 픽셀을 건너뛰어 계단 현상이 생긴다. 측정 예: 2048×1536 JPEG 원본 84.7KB → 썸네일 320×240 5.7KB.
+- `GET /api/photos/{id}/thumbnail`은 원본 조회와 같은 소유자 검사와 캐시 헤더(`private, immutable`, 1년, `Vary: Cookie`)를 쓴다. 변형 행이 없는 이전 사진은 같은 주소로 원본 파일을 돌려준다. 나중에 백필로 썸네일을 만들어도 이미 캐시한 브라우저는 같은 사진의 큰 파일을 계속 쓸 수 있다. 내용은 같고 전송량만 다르므로 허용한다. 기존 사진의 백필은 하지 않았다.
+- 기록 조회 응답의 `thumbnailUrl`은 지도 채우기·핀과 기록 카드가 쓰고, 지역 화면·상세 화면의 대표 사진은 원본 `photoUrl`을 쓴다. 상세 화면의 31px 장소 사진 칸은 `placePhotoThumbnailUrls`를 쓴다. `placePhotoUrls`는 원본 주소로 남겨 두는데, 기록 수정 폼이 이 주소의 마지막 부분을 사진 ID로 다시 보내기 때문이다.
+- 체험 모드는 IndexedDB 레코드에 `thumbnail` Blob(긴 변 320px JPEG, 품질 0.82)과 장소별 `placeThumbnails` Blob을 함께 저장한다. 서버와 같이 브라우저에서 준비한 2048px 사진으로 만든다. 썸네일이 없는 이전 레코드는 원본을 쓰고, 사진을 바꾸지 않고 수정·저장하면 그때 썸네일을 만든다. 수정 폼에서 장소를 지우거나 옮겨도 남은 장소 사진의 썸네일은 사진 주소로 찾아 그대로 옮긴다. 선택 필드를 추가했을 뿐이라 IndexedDB 버전은 올리지 않았다.
 
 ## 대량 사진 운영 흐름 — 설계, 미구현
 
@@ -69,7 +81,7 @@ V7까지는 `traveler.access_token_hash`(NOT NULL UNIQUE) 한 칸이 세션이�
 3. 브라우저가 직접 저장소로 전송. 서버를 통과하는 사진 트래픽을 줄인다. 업로드 정책으로 용량을 제한한다.
 4. 완료 요청을 받은 서버가 실제 저장 객체의 크기·체크섬을 확인한다. 클라이언트의 성공 주장만 믿지 않는다.
 5. 처리 워커가 포맷·픽셀 수·디코딩을 검증하고 EXIF 방향을 반영한 뒤 위치정보를 제거한다. 별도의 불변 최종 키에 안전한 이미지를 생성한다. 서명 URL의 재사용으로 검증 후 원본이 바뀌는 문제를 막는다.
-6. THUMBNAIL은 긴 변 320px, DISPLAY는 1600px로 축소한다. 원본 확대는 별도 동작으로만 제공한다. 작은 이미지를 확대하지 않는다.
+6. THUMBNAIL은 긴 변 320px, DISPLAY는 1600px로 축소한다. 원본 확대는 별도 동작으로만 제공한다. 작은 이미지를 확대하지 않는다. 현재 THUMBNAIL은 업로드 요청 안에서 동기로 만들며, 워커 도입 시 이 단계로 옮긴다.
 7. 파생 파일 메타데이터를 저장하고 photo를 READY로 전환한다. READY만 대표 사진으로 연결한다.
 8. 지도·목록은 썸네일, 상세는 DISPLAY를 읽는다. 비공개 다운로드 서명/인증된 CDN을 사용한다. 만료 URL 자체를 DB에 저장하지 않는다.
 

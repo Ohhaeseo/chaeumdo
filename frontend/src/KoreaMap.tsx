@@ -1,5 +1,7 @@
+import { Fragment, type KeyboardEvent } from "react";
 import { districts, mostRecentTripForRegion, provinces, type Region, type Trip } from "./data";
 import { useMapBoundaries } from "./mapData";
+import { needsPhotoPin, shapeMetrics } from "./mapShape.mjs";
 
 const points: Record<string, [number, number]> = {
   "11": [202, 145], "26": [408, 455], "27": [360, 354], "28": [138, 168],
@@ -7,8 +9,27 @@ const points: Record<string, [number, number]> = {
   "41": [220, 190], "42": [320, 125], "43": [280, 238], "44": [175, 285],
   "45": [210, 362], "46": [180, 485], "47": [380, 281], "48": [320, 425], "50": [150, 650],
 };
+// National photo pin: white ring radius and photo radius. The name sits inside the photo,
+// so a pin covers no more than its circle and leaves neighbouring labels readable.
+const PIN_RADIUS = 33;
+const PIN_PHOTO_RADIUS = 30;
 
 const appProvinceId = (boundaryId: string) => boundaryId === "51" ? "42" : boundaryId;
+
+// Boundaries do not change while the app runs, so each path is measured once.
+const measured = new Map<string, ReturnType<typeof shapeMetrics>>();
+function metrics(path: string) {
+  let value = measured.get(path);
+  if (!value) measured.set(path, value = shapeMetrics(path));
+  return value;
+}
+
+function pressable(action: () => void) {
+  return {
+    role: "button", tabIndex: 0, onClick: action,
+    onKeyDown: (event: KeyboardEvent) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); action(); } },
+  };
+}
 
 function MapLoadState({ error, retry }: { error: string; retry: () => void }) {
   if (error) return <div className="map-load-state map-load-error" role="alert"><p>{error}</p><button onClick={retry}>다시 불러오기</button></div>;
@@ -19,20 +40,44 @@ export default function KoreaMap({ trips, onProvince }: { trips: Trip[]; onProvi
   const { boundaries, error, retry } = useMapBoundaries();
   if (!boundaries) return <MapLoadState error={error} retry={retry} />;
   const byId = new Map(provinces.map(region => [region.id, region]));
-  const provinceTrip = (provinceId: string) => mostRecentTripForRegion(trips, provinceId);
+  const items = Object.entries(boundaries.provinces).flatMap(([id, path]) => {
+    const region = byId.get(appProvinceId(id));
+    if (!region) return [];
+    const shape = metrics(path);
+    const trip = mostRecentTripForRegion(trips, region.id);
+    return [{ region, path, shape, trip, pinned: Boolean(trip) && needsPhotoPin(shape.area, PIN_RADIUS * 2) }];
+  });
   return <svg className="korea-svg" viewBox="5 0 540 710" role="img" aria-label="대한민국 시·도 여행 지도">
-    <defs>{provinces.filter(region => provinceTrip(region.id)).map(region => <clipPath id={`pin-${region.id}`} key={region.id}><circle cx={points[region.id][0]} cy={points[region.id][1]} r="35" /></clipPath>)}</defs>
-    {Object.entries(boundaries.provinces).map(([id, path]) => {
-      const region = byId.get(appProvinceId(id));
-      if (!region) return null;
-      const visited = Boolean(provinceTrip(region.id));
-      return <path key={region.id} d={path} fill={visited ? "#E5E5E2" : region.recommended ? "#F7F7F5" : "#FFFFFF"} fillRule="evenodd" stroke="#696973" strokeWidth="1.4" className="province-path" role="button" tabIndex={0} aria-label={`${region.name}, ${visited ? "방문" : region.recommended ? "추천 여행지" : "미방문"}, 시·군·구 보기`} onClick={() => onProvince(region)} onKeyDown={event => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); onProvince(region); } }} />;
-    })}
+    <defs>{items.map(({ region, path, trip, pinned }) => trip && <Fragment key={region.id}>
+      <clipPath id={`province-photo-${region.id}`}><path d={path} clipRule="evenodd" /></clipPath>
+      {pinned && <clipPath id={`pin-${region.id}`}><circle cx={points[region.id][0]} cy={points[region.id][1]} r={PIN_PHOTO_RADIUS} /></clipPath>}
+    </Fragment>)}</defs>
+    {items.map(({ region, path, shape, trip }) => <g key={region.id} className="province-region" {...pressable(() => onProvince(region))} aria-label={`${region.name}, ${trip ? "방문" : region.recommended ? "추천 여행지" : "미방문"}, 시·군·구 보기`}>
+      <path d={path} fill={trip ? "#E5E5E2" : region.recommended ? "#F7F7F5" : "#FFFFFF"} fillRule="evenodd" stroke="#696973" strokeWidth="1.4" className="province-path" />
+      {trip && <>
+        <image href={trip.thumbnailUrl} x={shape.main.x} y={shape.main.y} width={shape.main.width} height={shape.main.height} preserveAspectRatio="xMidYMid slice" clipPath={`url(#province-photo-${region.id})`} className="region-photo" />
+        {/* The photo covers the inner half of the border, so the border is drawn again on top. */}
+        <path d={path} fill="none" stroke="#696973" strokeWidth="1.4" />
+      </>}
+    </g>)}
     <g pointerEvents="none">{boundaries.districts.map(district => <path key={district.id} d={district.path} fill="none" stroke="#E5E5E2" strokeWidth="0.8" />)}</g>
-    {provinces.map(region => {
-      const trip = provinceTrip(region.id);
+    {items.map(({ region, trip, pinned }) => {
       const [x, y] = points[region.id];
-      return trip ? <g key={region.id} role="button" tabIndex={0} className="photo-marker" aria-label={`${region.name} 여행사진, 시·군·구 보기`} onClick={() => onProvince(region)} onKeyDown={event => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); onProvince(region); } }}><circle cx={x} cy={y} r="39" fill="#FFFFFF" /><image href={trip.photoUrl} x={x - 35} y={y - 35} width="70" height="70" preserveAspectRatio="xMidYMid slice" clipPath={`url(#pin-${region.id})`} /><rect x={x - 35} y={y + 28} width="70" height="20" rx="10" fill="#111111" /><text x={x} y={y + 42} textAnchor="middle" fill="#FFFFFF" fontSize="12">{region.name}</text></g> : <text key={region.id} x={x} y={y} textAnchor="middle" className="map-label" pointerEvents="none">{region.name}</text>;
+      if (!trip) return <text key={region.id} x={x} y={y} textAnchor="middle" className="map-label" pointerEvents="none">{region.name}</text>;
+      if (pinned) return null;
+      const labelWidth = region.name.length * 12 + 16;
+      return <g key={region.id} className="map-photo-label" pointerEvents="none"><rect x={x - labelWidth / 2} y={y - 10} width={labelWidth} height="20" rx="10" /><text x={x} y={y + 4} textAnchor="middle">{region.name}</text></g>;
+    })}
+    {/* Pins go last so a neighbour's label never covers a photo. The province shape stays the one tab stop. */}
+    {items.map(({ region, trip, pinned }) => {
+      if (!trip || !pinned) return null;
+      const [x, y] = points[region.id];
+      const labelWidth = region.name.length * 12 + 16;
+      return <g key={region.id} className="photo-marker" aria-hidden="true" onClick={() => onProvince(region)}>
+        <circle cx={x} cy={y} r={PIN_RADIUS} fill="#FFFFFF" />
+        <image href={trip.thumbnailUrl} x={x - PIN_PHOTO_RADIUS} y={y - PIN_PHOTO_RADIUS} width={PIN_PHOTO_RADIUS * 2} height={PIN_PHOTO_RADIUS * 2} preserveAspectRatio="xMidYMid slice" clipPath={`url(#pin-${region.id})`} />
+        <g className="map-photo-label"><rect x={x - labelWidth / 2} y={y + 6} width={labelWidth} height="18" rx="9" /><text x={x} y={y + 19} textAnchor="middle">{region.name}</text></g>
+      </g>;
     })}
   </svg>;
 }
@@ -72,13 +117,18 @@ export function DistrictMap({ province, trips, onDistrict }: { province: Region;
   const maxY = Math.max(...shapeBounds.map(item => item.y + item.height));
   const padding = Math.max(maxX - minX, maxY - minY) * (province.id === "11" ? .045 : .09);
   const byId = new Map(districts.map(region => [region.id, region]));
-  const tripByDistrict = new Map(shapes.map(shape => [shape.id, mostRecentTripForRegion(trips, shape.id)]));
   const labelSize = Math.max(.65, (maxX - minX) / (province.id === "11" ? 40 : 38));
   const boundaryProvinceId = province.id === "42" ? "51" : province.id;
   const provincePath = boundaries.provinces[boundaryProvinceId as keyof typeof boundaries.provinces];
   const labelPoint = (shapeId: string, bounds: Bounds): [number, number] => province.id === "11" && seoulLabelPoints[shapeId]
     ? seoulLabelPoints[shapeId]
     : [bounds.cx, bounds.cy];
+  const items = shapes.map((shape, index) => {
+    const bounds = shapeBounds[index];
+    const metric = metrics(shape.path);
+    const trip = mostRecentTripForRegion(trips, shape.id);
+    return { shape, region: byId.get(shape.id)!, bounds, metric, trip, label: labelPoint(shape.id, bounds), pinned: Boolean(trip) && needsPhotoPin(metric.area, labelSize * 1.45 * 2) };
+  });
 
   return <svg className="district-svg" viewBox={`${minX - padding} ${minY - padding} ${maxX - minX + padding * 2} ${maxY - minY + padding * 2}`} role="img" aria-label={`${province.fullName} 시·군·구 여행 지도`}>
     <defs>
@@ -86,23 +136,18 @@ export function DistrictMap({ province, trips, onDistrict }: { province: Region;
         <feDropShadow dx="0" dy=".35" stdDeviation=".55" floodColor="#596058" floodOpacity=".22" />
       </filter>
       <clipPath id={`province-clip-${province.id}`}><path d={provincePath} /></clipPath>
-      {shapes.map((shape, index) => {
-        const trip = tripByDistrict.get(shape.id);
-        if (!trip) return null;
-        const [x, y] = labelPoint(shape.id, shapeBounds[index]);
-        return <clipPath id={`district-pin-${shape.id}`} key={shape.id}><circle cx={x} cy={y} r={labelSize * 1.25} /></clipPath>;
-      })}
+      {items.map(({ shape, trip, pinned, label: [x, y] }) => trip && <Fragment key={shape.id}>
+        <clipPath id={`district-photo-${shape.id}`}><path d={shape.path} /></clipPath>
+        {pinned && <clipPath id={`district-pin-${shape.id}`}><circle cx={x} cy={y} r={labelSize * 1.25} /></clipPath>}
+      </Fragment>)}
     </defs>
     <path className="province-silhouette" d={provincePath} filter={`url(#map-shadow-${province.id})`} />
-    {shapes.map((shape, index) => {
-      const region = byId.get(shape.id)!;
-      const trip = tripByDistrict.get(region.id);
-      const bounds = shapeBounds[index];
-      const [labelX, labelY] = labelPoint(shape.id, bounds);
+    {items.map(({ shape, region, bounds, metric, trip, label: [labelX, labelY] }) => {
       const hitRadius = Math.max(labelSize * 1.7, Math.min(bounds.width, bounds.height) * .42);
-      return <g key={region.id} className="district-region" role="button" tabIndex={0} aria-label={`${region.name}, ${trip ? "방문" : "미방문"}`} onClick={() => onDistrict(region)} onKeyDown={event => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); onDistrict(region); } }}>
+      return <g key={region.id} className="district-region" {...pressable(() => onDistrict(region))} aria-label={`${region.name}, ${trip ? "방문" : "미방문"}`}>
         <title>{region.name} · {trip ? "방문" : "미방문"}</title>
         <path d={shape.path} fill={trip ? "#D9D9D4" : "#FFFFFF"} stroke="none" />
+        {trip && <image href={trip.thumbnailUrl} x={metric.main.x} y={metric.main.y} width={metric.main.width} height={metric.main.height} preserveAspectRatio="xMidYMid slice" clipPath={`url(#district-photo-${shape.id})`} className="region-photo" />}
         <circle className="district-hit" cx={labelX} cy={labelY} r={hitRadius} />
       </g>;
     })}
@@ -115,16 +160,13 @@ export function DistrictMap({ province, trips, onDistrict }: { province: Region;
       <path className="seoul-river-water" d={seoulRiverPath} />
     </g>}
     <path className="province-outline" d={provincePath} pointerEvents="none" />
-    {shapes.map((shape, index) => {
-      const region = byId.get(shape.id)!;
-      const trip = tripByDistrict.get(region.id);
-      const bounds = shapeBounds[index];
-      const [labelX, labelY] = labelPoint(shape.id, bounds);
+    {items.map(({ region, trip, pinned, label: [labelX, labelY] }) => {
       const labelWidth = labelSize * (region.name.length * .72 + .8);
+      const label = <><rect className={trip ? "district-label-bg visited" : "district-label-bg"} x={labelX - labelWidth / 2} y={labelY - labelSize * .73} width={labelWidth} height={labelSize * 1.46} rx={labelSize * .55} /><text x={labelX} y={labelY} textAnchor="middle" dominantBaseline="middle" fontSize={labelSize} className={trip ? "district-label visited" : "district-label"}>{region.name}</text></>;
       return <g key={`marker-${region.id}`} className="district-marker" pointerEvents="none">
-        {trip
-          ? <><circle cx={labelX} cy={labelY} r={labelSize * 1.45} fill="#FFFFFF" /><image href={trip.photoUrl} x={labelX - labelSize * 1.25} y={labelY - labelSize * 1.25} width={labelSize * 2.5} height={labelSize * 2.5} preserveAspectRatio="xMidYMid slice" clipPath={`url(#district-pin-${region.id})`} /></>
-          : <><rect className="district-label-bg" x={labelX - labelWidth / 2} y={labelY - labelSize * .73} width={labelWidth} height={labelSize * 1.46} rx={labelSize * .55} /><text x={labelX} y={labelY} textAnchor="middle" dominantBaseline="middle" fontSize={labelSize} className="district-label">{region.name}</text></>}
+        {pinned && trip
+          ? <><circle cx={labelX} cy={labelY} r={labelSize * 1.45} fill="#FFFFFF" /><image href={trip.thumbnailUrl} x={labelX - labelSize * 1.25} y={labelY - labelSize * 1.25} width={labelSize * 2.5} height={labelSize * 2.5} preserveAspectRatio="xMidYMid slice" clipPath={`url(#district-pin-${region.id})`} /></>
+          : label}
       </g>;
     })}
   </svg>;
