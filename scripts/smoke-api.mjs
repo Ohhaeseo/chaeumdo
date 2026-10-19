@@ -102,6 +102,8 @@ assert.equal(list[0].companion, "민지,준호");
 assert.equal(list[0].thumbnailUrl, `/api/photos/${photoId}/thumbnail`);
 assert.equal(list[0].placePhotoUrls[0][0], `/api/photos/${photoId}`);
 assert.equal(list[0].placePhotoUrls[2][0], null);
+assert.equal(list[0].placePhotoThumbnailUrls[0][0], `/api/photos/${photoId}/thumbnail`);
+assert.equal(list[0].placePhotoThumbnailUrls[2][0], null);
 assert.equal(list[0].placeLocations[0][0].sourceId, "W/307131");
 const stats = await (await fetch(base + "/stats", { headers })).json();
 assert.deepEqual(stats, { regions: 3, trips: 1, days: 3 });
@@ -117,6 +119,7 @@ assert.deepEqual(updated[0].regionIds, ["26110", "26350"]);
 assert.deepEqual(updated[0].days, [["해변"], [], ["시장"]]);
 assert.equal(updated[0].companion, "민지,준호");
 assert.equal(updated[0].placePhotoUrls[0][0], `/api/photos/${photoId}`);
+assert.equal(updated[0].placePhotoThumbnailUrls[0][0], `/api/photos/${photoId}/thumbnail`);
 assert.equal(updated[0].placeLocations[0][0].sourceId, "W/307131");
 const clearPlacePhoto = await fetch(base + "/trips/" + list[0].id, {
   method: "PATCH",
@@ -126,6 +129,7 @@ const clearPlacePhoto = await fetch(base + "/trips/" + list[0].id, {
 assert.equal(clearPlacePhoto.status, 200);
 const cleared = await (await fetch(base + "/trips", { headers })).json();
 assert.equal(cleared[0].placePhotoUrls[0][0], null);
+assert.equal(cleared[0].placePhotoThumbnailUrls[0][0], null);
 const otherUpdate = await fetch(base + "/trips/" + list[0].id, {
   method: "PATCH",
   headers: { ...otherHeaders, "Content-Type": "application/json" },
@@ -199,5 +203,5 @@ for (const accountHeaders of [headers, otherHeaders]) {
 assert.equal((await fetch(base + "/photos/" + leftoverId + "/thumbnail", { headers: otherHeaders })).status, 401);
 if (mediaRoot) assert.deepEqual(await mediaFiles(leftoverId), [], "account deletion removes original and thumbnail files");
 console.log(
-  `PASS: public regions without session, 17 provinces + 250 districts + 3,627 neighborhoods, 10-digit multi-region trips, account-only upload/read, private photo cache, owner isolation, 320px thumbnail read/cache/owner isolation/cleanup on trip and account deletion${mediaRoot ? " (files checked on disk)" : ""}, place photo/location save/retain/remove, atomic retry, create/update/delete, stats, invalid dates/day count, request header protection, JSON error message`,
+  `PASS: public regions without session, 17 provinces + 250 districts + 3,627 neighborhoods, 10-digit multi-region trips, account-only upload/read, private photo cache, owner isolation, 320px cover/place thumbnail URLs and read/cache/owner isolation/cleanup on trip and account deletion${mediaRoot ? " (files checked on disk)" : ""}, place photo/location save/retain/remove, atomic retry, create/update/delete, stats, invalid dates/day count, request header protection, JSON error message`,
 );

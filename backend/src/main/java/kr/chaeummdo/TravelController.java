@@ -36,7 +36,7 @@ public class TravelController {
   }
   public record Region(String id, String name, boolean recommended, String introduction, String parentId, String level) {}
   public record Trip(UUID id, String regionId, List<String> regionIds, String photoUrl, String thumbnailUrl, LocalDate startDate, LocalDate endDate,
-    String companion, List<List<String>> days, List<List<String>> placePhotoUrls, List<List<PlaceLocation>> placeLocations) {}
+    String companion, List<List<String>> days, List<List<String>> placePhotoUrls, List<List<String>> placePhotoThumbnailUrls, List<List<PlaceLocation>> placeLocations) {}
   public record PlaceLocation(Double latitude, Double longitude, String address, String source, String sourceId) {}
   public record TripInput(@NotNull UUID requestId, @NotBlank @Size(max=10) String regionId, @Size(max=10) List<@NotBlank @Size(max=10) String> regionIds, @NotNull UUID photoId,
     @NotNull LocalDate startDate, @NotNull LocalDate endDate, @Size(max=200) String companion,
@@ -66,6 +66,7 @@ public class TravelController {
     if(regionIds.isEmpty()) regionIds=List.of(region);
     List<List<String>> days = new ArrayList<>();
     List<List<String>> placePhotoUrls = new ArrayList<>();
+    List<List<String>> placePhotoThumbnailUrls = new ArrayList<>();
     List<List<PlaceLocation>> placeLocations = new ArrayList<>();
     for(int day=1;day<=duration(start,end);day++) {
       var rows=db.sql("SELECT name,photo_id,latitude,longitude,place_address,place_source,place_source_id FROM trip_place WHERE trip_id=:id AND day_number=:day ORDER BY position")
@@ -75,13 +76,17 @@ public class TravelController {
         UUID placePhoto=(UUID)row.get("photo_id");
         return placePhoto==null?null:"/api/photos/"+placePhoto;
       }).toList());
+      placePhotoThumbnailUrls.add(rows.stream().map(row->{
+        UUID placePhoto=(UUID)row.get("photo_id");
+        return placePhoto==null?null:"/api/photos/"+placePhoto+"/thumbnail";
+      }).toList());
       placeLocations.add(rows.stream().map(row->{
         if(row.get("latitude")==null || row.get("longitude")==null) return null;
         return new PlaceLocation(((Number)row.get("latitude")).doubleValue(),((Number)row.get("longitude")).doubleValue(),
           Objects.toString(row.get("place_address"),""),Objects.toString(row.get("place_source"),"OpenStreetMap"),Objects.toString(row.get("place_source_id"),""));
       }).toList());
     }
-    return new Trip(id,region,regionIds,"/api/photos/"+photo,"/api/photos/"+photo+"/thumbnail",start,end,companion,days,placePhotoUrls,placeLocations);
+    return new Trip(id,region,regionIds,"/api/photos/"+photo,"/api/photos/"+photo+"/thumbnail",start,end,companion,days,placePhotoUrls,placePhotoThumbnailUrls,placeLocations);
   }
   private List<String> normalizedRegions(String primary,List<String> input) {
     List<String> result=(input==null || input.isEmpty())?List.of(primary):input.stream().map(String::trim).toList();
