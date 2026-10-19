@@ -55,7 +55,7 @@
 | 백엔드 | Java 21, Spring Boot 4, Spring JDBC, Validation |
 | 데이터베이스 | PostgreSQL 17, Flyway |
 | 로컬 저장 | IndexedDB |
-| 지도 데이터 | 국가공간정보포털·V-World 기반 행정 경계 |
+| 지도 데이터 | 국가공간정보포털·V-World 기반 행정 경계. 제주 읍·면·동은 통계청 SGIS 행정동 경계(공공누리 제1유형), 가공 [vuski/admdongkor](https://github.com/vuski/admdongkor)(CC BY 4.0) |
 | 장소 검색 | Photon, OpenStreetMap |
 
 ## 프로젝트 구조
