@@ -66,13 +66,15 @@ public class AccountController {
           .param("recovery",TravelerSession.hash(code)).param("id",anonymous.get()).update();
         if(updated==0) throw new ResponseStatusException(HttpStatus.CONFLICT,"이미 계정에 연결된 기록입니다.");
       } else {
-        String token = session.newToken();
-        db.sql("INSERT INTO traveler(id,access_token_hash,username,display_name,password_hash,recovery_code_hash) VALUES(:id,:token,:username,:name,:password,:recovery)")
-          .param("id",UUID.randomUUID()).param("token",TravelerSession.hash(token))
-          .param("username",username).param("name",input.displayName().trim())
-          .param("password",passwords.encode(input.password()))
-          .param("recovery",TravelerSession.hash(code)).update();
-        session.setCookie(req,res,token);
+        // The account and its first session commit together, so the app can go straight to the map.
+        UUID id = UUID.randomUUID();
+        String password = passwords.encode(input.password());
+        tx.executeWithoutResult(status -> {
+          db.sql("INSERT INTO traveler(id,username,display_name,password_hash,recovery_code_hash) VALUES(:id,:username,:name,:password,:recovery)")
+            .param("id",id).param("username",username).param("name",input.displayName().trim())
+            .param("password",password).param("recovery",TravelerSession.hash(code)).update();
+          session.rotate(id,req,res);
+        });
       }
     } catch(DuplicateKeyException e) { throw new ResponseStatusException(HttpStatus.CONFLICT,"이미 사용 중인 아이디입니다."); }
     return Map.of("username",username,"displayName",input.displayName().trim(),"recoveryCode",code);
@@ -105,7 +107,6 @@ public class AccountController {
   }
   @PostMapping("/logout") public void logout(HttpServletRequest req,HttpServletResponse res) {
     session.checkMutation(req);
-    session.existing(req).ifPresent(id->session.rotate(id,req,res));
     session.clear(req,res);
   }
   @PostMapping("/recover-id") public Map<String,String> recoverId(@Valid @RequestBody Recovery input,HttpServletRequest req) {
@@ -122,10 +123,14 @@ public class AccountController {
       .param("username",input.username()).param("hash",TravelerSession.hash(input.recoveryCode()))
       .query(UUID.class).optional().orElseThrow(()->new ResponseStatusException(HttpStatus.UNAUTHORIZED,"아이디와 복구 코드를 확인해 주세요."));
     String newCode=session.newToken();
-    db.sql("UPDATE traveler SET password_hash=:password,recovery_code_hash=:recovery,failed_attempts=0,locked_until=NULL WHERE id=:id")
-      .param("password",passwords.encode(input.newPassword()))
-      .param("recovery",TravelerSession.hash(newCode)).param("id",id).update();
-    session.rotate(id,req,res);
+    String password=passwords.encode(input.newPassword());
+    // A reset may follow a leaked password, so every device is signed out; only this one gets a new session.
+    tx.executeWithoutResult(status->{
+      db.sql("UPDATE traveler SET password_hash=:password,recovery_code_hash=:recovery,failed_attempts=0,locked_until=NULL WHERE id=:id")
+        .param("password",password).param("recovery",TravelerSession.hash(newCode)).param("id",id).update();
+      session.revokeAll(id);
+      session.rotate(id,req,res);
+    });
     return Map.of("recoveryCode",newCode);
   }
   @PostMapping("/delete") public void delete(@Valid @RequestBody PasswordInput input,
@@ -141,6 +146,7 @@ public class AccountController {
         .param("id",id).query(String.class).list();
       db.sql("DELETE FROM trip WHERE owner_id=:id").param("id",id).update();
       db.sql("DELETE FROM photo WHERE owner_id=:id").param("id",id).update();
+      // traveler_session rows cascade, so the account is signed out on every device.
       db.sql("DELETE FROM traveler WHERE id=:id").param("id",id).update();
       return objects;
     });
