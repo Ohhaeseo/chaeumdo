@@ -17,6 +17,8 @@ export type Trip = {
   regionId: string;
   regionIds: string[];
   photoUrl: string;
+  // Long edge 320px, for maps and record cards. Photos saved before thumbnails use photoUrl here.
+  thumbnailUrl: string;
   startDate: string;
   endDate: string;
   companion: string;
@@ -125,8 +127,9 @@ export function mostRecentTripForRegion(trips: Trip[], regionId: string) {
     return !latest || candidate.startDate > latest.startDate ? candidate : latest;
   }, undefined);
 }
-type StoredTrip = Omit<Trip, "photoUrl" | "placePhotoUrls"> & {
+type StoredTrip = Omit<Trip, "photoUrl" | "thumbnailUrl" | "placePhotoUrls"> & {
   photo: Blob;
+  thumbnail?: Blob;
   placePhotos?: (Blob | null)[][];
 };
 function openDB(): Promise<IDBDatabase> {
@@ -148,21 +151,25 @@ export async function localTrips(): Promise<Trip[]> {
   db.close();
   return values
     .sort((a, b) => b.startDate.localeCompare(a.startDate))
-    .map(({ photo, placePhotos, ...trip }) => ({
-      ...trip,
-      regionIds: regionIdsForTrip(trip),
-      photoUrl: URL.createObjectURL(photo),
-      placePhotoUrls: trip.days.map((day, i) => day.map((_, j) => {
-        const placePhoto = placePhotos?.[i]?.[j];
-        return placePhoto ? URL.createObjectURL(placePhoto) : null;
-      })),
-    }));
+    .map(({ photo, thumbnail, placePhotos, ...trip }) => {
+      const photoUrl = URL.createObjectURL(photo);
+      return {
+        ...trip,
+        regionIds: regionIdsForTrip(trip),
+        photoUrl,
+        thumbnailUrl: thumbnail ? URL.createObjectURL(thumbnail) : photoUrl,
+        placePhotoUrls: trip.days.map((day, i) => day.map((_, j) => {
+          const placePhoto = placePhotos?.[i]?.[j];
+          return placePhoto ? URL.createObjectURL(placePhoto) : null;
+        })),
+      };
+    });
 }
-export async function saveLocal(trip: Omit<Trip, "photoUrl" | "placePhotoUrls">, photo: Blob, placePhotos: (Blob | null)[][]) {
+export async function saveLocal(trip: Omit<Trip, "photoUrl" | "thumbnailUrl" | "placePhotoUrls">, photo: Blob, thumbnail: Blob, placePhotos: (Blob | null)[][]) {
   const db = await openDB();
   await new Promise<void>((resolve, reject) => {
     const tx = db.transaction("trips", "readwrite");
-    tx.objectStore("trips").put({ ...trip, photo, placePhotos });
+    tx.objectStore("trips").put({ ...trip, photo, thumbnail, placePhotos });
     tx.oncomplete = () => resolve();
     tx.onerror = () => reject(tx.error);
     tx.onabort = () => reject(tx.error);

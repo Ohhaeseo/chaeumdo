@@ -137,8 +137,12 @@ public class AccountController {
       .orElseThrow(()->new ResponseStatusException(HttpStatus.UNAUTHORIZED));
     if(!passwords.matches(input.password(),saved)) throw new ResponseStatusException(HttpStatus.UNAUTHORIZED,"비밀번호를 확인해 주세요.");
     List<String> keys=tx.execute(status->{
-      List<String> objects=db.sql("SELECT object_key FROM photo WHERE owner_id=:id")
-        .param("id",id).query(String.class).list();
+      // Variant rows go with their photo by cascade, so their files are collected here first.
+      List<String> objects=db.sql("""
+        SELECT object_key FROM photo WHERE owner_id=:id
+        UNION ALL
+        SELECT variant.object_key FROM photo_variant variant JOIN photo ON photo.id=variant.photo_id WHERE photo.owner_id=:id
+        """).param("id",id).query(String.class).list();
       db.sql("DELETE FROM trip WHERE owner_id=:id").param("id",id).update();
       db.sql("DELETE FROM photo WHERE owner_id=:id").param("id",id).update();
       db.sql("DELETE FROM traveler WHERE id=:id").param("id",id).update();

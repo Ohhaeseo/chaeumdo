@@ -3,7 +3,7 @@ import { ArrowLeft, ImagePlus, LoaderCircle, MapPin, Plus, Search, X } from "luc
 import { api, districts, neighborhoods, provinceIdForRegion, provinces, regionById, regionIdsForTrip, saveLocal, type PlaceLocation, type Region, type Trip } from "./data";
 import { inclusiveDays } from "./dates.mjs";
 import { searchPlaces, type PlaceSearchResult } from "./placeSearch";
-import { preparePhoto } from "./photo";
+import { preparePhoto, prepareThumbnail } from "./photo";
 
 type PlacePhoto = File | string | null;
 type PlaceRow = { name: string; photo: PlacePhoto; location: PlaceLocation | null };
@@ -256,6 +256,10 @@ export default function TravelForm({ region, trip, mode, onBack, onSaved }: {
     try {
       if (mode === "demo") {
         const cover = file ? await preparePhoto(file) : await (await fetch(trip!.photoUrl)).blob();
+        // A record saved before thumbnails has one URL for both, so it gets its thumbnail now.
+        const thumbnail = !file && trip!.thumbnailUrl !== trip!.photoUrl
+          ? await (await fetch(trip!.thumbnailUrl)).blob()
+          : await prepareThumbnail(cover);
         // One photo at a time keeps decoding memory low on phones.
         const photos: (Blob | null)[][] = [];
         for (const day of rows) {
@@ -267,7 +271,7 @@ export default function TravelForm({ region, trip, mode, onBack, onSaved }: {
           }
           photos.push(photoDay);
         }
-        await saveLocal(next, cover, photos);
+        await saveLocal(next, cover, thumbnail, photos);
       } else {
         const photoId = file ? await uploadPhoto(file) : undefined;
         const placePhotoIds: (string | null)[][] = [];

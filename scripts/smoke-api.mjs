@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { readdir, readFile } from "node:fs/promises";
 const base = process.env.API_URL || "http://127.0.0.1:8080/api";
+// Optional: the backend's MEDIA_ROOT, to also check that photo files leave the disk.
+const mediaRoot = process.env.MEDIA_ROOT;
+const mediaFiles = async (id) => (await readdir(mediaRoot, { recursive: true })).filter((name) => name.includes(id));
+const pngSize = (bytes) => ({ width: bytes.readUInt32BE(16), height: bytes.readUInt32BE(20) });
 // Run only against a development DB: this registers two throwaway accounts and deletes them at the end.
 const init = await fetch(base + "/regions");
 assert.equal(init.status, 200);
@@ -49,6 +53,22 @@ assert.equal(
   404,
   "another account must not read photo",
 );
+const thumbnail = await fetch(base + "/photos/" + photoId + "/thumbnail", { headers });
+assert.equal(thumbnail.status, 200);
+assert.equal(thumbnail.headers.get("content-type"), "image/png", "thumbnail keeps the original format");
+assert.match(thumbnail.headers.get("cache-control"), /private.*immutable|immutable.*private/);
+assert.match(thumbnail.headers.get("vary"), /Cookie/);
+const original = pngSize(picture);
+const small = pngSize(Buffer.from(await thumbnail.arrayBuffer()));
+assert.equal(Math.max(small.width, small.height), Math.min(320, Math.max(original.width, original.height)), "thumbnail long edge is 320px, never enlarged");
+assert.ok(Math.abs(small.width / small.height - original.width / original.height) < 0.01, "thumbnail keeps the aspect ratio");
+assert.equal((await fetch(base + "/photos/" + photoId + "/thumbnail")).status, 401);
+assert.equal(
+  (await fetch(base + "/photos/" + photoId + "/thumbnail", { headers: otherHeaders })).status,
+  404,
+  "another account must not read thumbnail",
+);
+if (mediaRoot) assert.equal((await mediaFiles(photoId)).length, 2, "original and thumbnail files are stored");
 const payload = {
   requestId: crypto.randomUUID(),
   regionId: "1111051500",
@@ -79,6 +99,7 @@ assert.equal(list.length, 1);
 assert.deepEqual(list[0].days, payload.days);
 assert.deepEqual(list[0].regionIds, payload.regionIds);
 assert.equal(list[0].companion, "민지,준호");
+assert.equal(list[0].thumbnailUrl, `/api/photos/${photoId}/thumbnail`);
 assert.equal(list[0].placePhotoUrls[0][0], `/api/photos/${photoId}`);
 assert.equal(list[0].placePhotoUrls[2][0], null);
 assert.equal(list[0].placeLocations[0][0].sourceId, "W/307131");
@@ -158,7 +179,15 @@ const deleted = await fetch(base + "/trips/" + list[0].id, {
 assert.equal(deleted.status, 200);
 assert.equal((await (await fetch(base + "/trips", { headers })).json()).length, 0);
 assert.equal((await fetch(base + "/photos/" + photoId, { headers })).status, 404);
+assert.equal((await fetch(base + "/photos/" + photoId + "/thumbnail", { headers })).status, 404);
+if (mediaRoot) assert.deepEqual(await mediaFiles(photoId), [], "trip deletion removes original and thumbnail files");
 assert.deepEqual(await (await fetch(base + "/stats", { headers })).json(), { regions: 0, trips: 0, days: 0 });
+// A photo no trip uses is removed only by deleting the account.
+const leftover = await fetch(base + "/photos", { method: "POST", headers: otherHeaders, body: form });
+assert.equal(leftover.status, 200);
+const { id: leftoverId } = await leftover.json();
+assert.equal((await fetch(base + "/photos/" + leftoverId + "/thumbnail", { headers: otherHeaders })).status, 200);
+if (mediaRoot) assert.equal((await mediaFiles(leftoverId)).length, 2);
 for (const accountHeaders of [headers, otherHeaders]) {
   const removed = await fetch(base + "/auth/delete", {
     method: "POST",
@@ -167,6 +196,8 @@ for (const accountHeaders of [headers, otherHeaders]) {
   });
   assert.equal(removed.status, 200);
 }
+assert.equal((await fetch(base + "/photos/" + leftoverId + "/thumbnail", { headers: otherHeaders })).status, 401);
+if (mediaRoot) assert.deepEqual(await mediaFiles(leftoverId), [], "account deletion removes original and thumbnail files");
 console.log(
-  "PASS: public regions without session, 17 provinces + 250 districts + 3,627 neighborhoods, 10-digit multi-region trips, account-only upload/read, private photo cache, owner isolation, place photo/location save/retain/remove, atomic retry, create/update/delete, stats, invalid dates/day count, request header protection, JSON error message",
+  `PASS: public regions without session, 17 provinces + 250 districts + 3,627 neighborhoods, 10-digit multi-region trips, account-only upload/read, private photo cache, owner isolation, 320px thumbnail read/cache/owner isolation/cleanup on trip and account deletion${mediaRoot ? " (files checked on disk)" : ""}, place photo/location save/retain/remove, atomic retry, create/update/delete, stats, invalid dates/day count, request header protection, JSON error message`,
 );

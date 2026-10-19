@@ -16,6 +16,8 @@ import java.time.*;
 import java.time.temporal.ChronoUnit;
 import java.util.*;
 import java.io.*;
+import java.awt.RenderingHints;
+import java.awt.image.BufferedImage;
 import javax.imageio.ImageIO;
 
 @RestController
@@ -33,7 +35,7 @@ public class TravelController {
     return session.require(req);
   }
   public record Region(String id, String name, boolean recommended, String introduction, String parentId, String level) {}
-  public record Trip(UUID id, String regionId, List<String> regionIds, String photoUrl, LocalDate startDate, LocalDate endDate,
+  public record Trip(UUID id, String regionId, List<String> regionIds, String photoUrl, String thumbnailUrl, LocalDate startDate, LocalDate endDate,
     String companion, List<List<String>> days, List<List<String>> placePhotoUrls, List<List<PlaceLocation>> placeLocations) {}
   public record PlaceLocation(Double latitude, Double longitude, String address, String source, String sourceId) {}
   public record TripInput(@NotNull UUID requestId, @NotBlank @Size(max=10) String regionId, @Size(max=10) List<@NotBlank @Size(max=10) String> regionIds, @NotNull UUID photoId,
@@ -79,7 +81,7 @@ public class TravelController {
           Objects.toString(row.get("place_address"),""),Objects.toString(row.get("place_source"),"OpenStreetMap"),Objects.toString(row.get("place_source_id"),""));
       }).toList());
     }
-    return new Trip(id,region,regionIds,"/api/photos/"+photo,start,end,companion,days,placePhotoUrls,placeLocations);
+    return new Trip(id,region,regionIds,"/api/photos/"+photo,"/api/photos/"+photo+"/thumbnail",start,end,companion,days,placePhotoUrls,placeLocations);
   }
   private List<String> normalizedRegions(String primary,List<String> input) {
     List<String> result=(input==null || input.isEmpty())?List.of(primary):input.stream().map(String::trim).toList();
@@ -256,6 +258,7 @@ public class TravelController {
     }
     if(!Set.of("jpeg","png").contains(format) || width<1 || height<1 || (long)width*height>40000000) throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"JPEG·PNG, 4천만 화소 이하 사진을 선택해 주세요.");
     UUID id=UUID.randomUUID(); String key=user+"/"+id+"."+format; Path path=root.resolve(key);
+    String thumbnailKey=user+"/"+id+"-thumbnail."+format; Path thumbnailPath=root.resolve(thumbnailKey);
     Files.createDirectories(path.getParent());
     try {
       // Decode and re-encode: verify actual pixels and remove EXIF/location metadata.
@@ -263,14 +266,52 @@ public class TravelController {
       if(decoded==null || !ImageIO.write(decoded,format,path.toFile())) throw new IOException("사진을 읽을 수 없습니다.");
       long size=Files.size(path);
       if(size>15728640) throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"처리된 사진이 15MB를 넘습니다. 크기를 줄여 주세요.");
-      db.sql("INSERT INTO photo(id,owner_id,object_key,content_type,byte_size,width,height) VALUES(:id,:owner,:key,:type,:size,:width,:height)").param("id",id).param("owner",user).param("key",key).param("type","image/"+format).param("size",size).param("width",width).param("height",height).update();
-    } catch(Exception e) { Files.deleteIfExists(path); throw e; }
+      // Maps and record cards read this small copy; it keeps the original's format, so it shares its content type.
+      var thumbnail=thumbnail(decoded,THUMBNAIL_EDGE);
+      if(!ImageIO.write(thumbnail,format,thumbnailPath.toFile())) throw new IOException("썸네일을 만들 수 없습니다.");
+      long thumbnailSize=Files.size(thumbnailPath);
+      tx.executeWithoutResult(status->{
+        db.sql("INSERT INTO photo(id,owner_id,object_key,content_type,byte_size,width,height) VALUES(:id,:owner,:key,:type,:size,:width,:height)").param("id",id).param("owner",user).param("key",key).param("type","image/"+format).param("size",size).param("width",width).param("height",height).update();
+        db.sql("INSERT INTO photo_variant(photo_id,kind,object_key,width,height,byte_size) VALUES(:id,'THUMBNAIL',:key,:width,:height,:size)")
+          .param("id",id).param("key",thumbnailKey).param("width",thumbnail.getWidth()).param("height",thumbnail.getHeight()).param("size",thumbnailSize).update();
+      });
+    } catch(Exception e) { Files.deleteIfExists(path); Files.deleteIfExists(thumbnailPath); throw e; }
     return Map.of("id",id);
   }
+  static final int THUMBNAIL_EDGE=320;
+  // Shrinks to fit maxEdge without enlarging. Halving in steps keeps bilinear scaling from skipping pixels.
+  static BufferedImage thumbnail(BufferedImage source,int maxEdge) {
+    double scale=Math.min(1d,(double)maxEdge/Math.max(source.getWidth(),source.getHeight()));
+    int width=Math.max(1,(int)Math.round(source.getWidth()*scale)), height=Math.max(1,(int)Math.round(source.getHeight()*scale));
+    int type=source.getColorModel().hasAlpha()?BufferedImage.TYPE_INT_ARGB:BufferedImage.TYPE_INT_RGB;
+    BufferedImage current=source;
+    do {
+      var next=new BufferedImage(Math.max(width,current.getWidth()/2),Math.max(height,current.getHeight()/2),type);
+      var graphics=next.createGraphics();
+      try {
+        graphics.setRenderingHint(RenderingHints.KEY_INTERPOLATION,RenderingHints.VALUE_INTERPOLATION_BILINEAR);
+        graphics.drawImage(current,0,0,next.getWidth(),next.getHeight(),null);
+      } finally { graphics.dispose(); }
+      current=next;
+    } while(current.getWidth()!=width || current.getHeight()!=height);
+    return current;
+  }
   @GetMapping("/photos/{id}") public ResponseEntity<org.springframework.core.io.Resource> photo(@PathVariable UUID id,HttpServletRequest req) {
-    var photo=db.sql("SELECT object_key,content_type FROM photo WHERE id=:id AND owner_id=:owner AND status='READY'").param("id",id).param("owner",owner(req)).query().listOfRows().stream().findFirst().orElseThrow(()->new ResponseStatusException(HttpStatus.NOT_FOUND));
+    return stored(db.sql("SELECT object_key,content_type FROM photo WHERE id=:id AND owner_id=:owner AND status='READY'").param("id",id).param("owner",owner(req)));
+  }
+  // Photos uploaded before thumbnails existed have no variant, so the original stands in for them.
+  @GetMapping("/photos/{id}/thumbnail") public ResponseEntity<org.springframework.core.io.Resource> thumbnail(@PathVariable UUID id,HttpServletRequest req) {
+    return stored(db.sql("""
+      SELECT coalesce(variant.object_key,photo.object_key) AS object_key,photo.content_type FROM photo
+      LEFT JOIN photo_variant variant ON variant.photo_id=photo.id AND variant.kind='THUMBNAIL'
+      WHERE photo.id=:id AND photo.owner_id=:owner AND photo.status='READY'
+      """).param("id",id).param("owner",owner(req)));
+  }
+  private ResponseEntity<org.springframework.core.io.Resource> stored(JdbcClient.StatementSpec query) {
+    var photo=query.query().listOfRows().stream().findFirst().orElseThrow(()->new ResponseStatusException(HttpStatus.NOT_FOUND));
     var resource=new org.springframework.core.io.FileSystemResource(root.resolve((String)photo.get("object_key")));
     // A photo id never points at different bytes, so the owner's browser may keep it; Vary keeps it per session.
+    // A thumbnail URL served from the original still shows the same picture, only larger.
     return ResponseEntity.ok().contentType(MediaType.parseMediaType((String)photo.get("content_type")))
       .cacheControl(CacheControl.maxAge(Duration.ofDays(365)).cachePrivate().immutable()).header("Vary","Cookie")
       .header("X-Content-Type-Options","nosniff").body(resource);
