@@ -107,6 +107,37 @@ assert.equal(list[0].placePhotoThumbnailUrls[2][0], null);
 assert.equal(list[0].placeLocations[0][0].sourceId, "W/307131");
 const stats = await (await fetch(base + "/stats", { headers })).json();
 assert.deepEqual(stats, { regions: 3, trips: 1, days: 3 });
+// 시·도 map photos: any 시·도 may carry one, trips or not; replacing or removing one deletes a photo nothing else uses.
+const uploadAs = async (accountHeaders) => (await (await fetch(base + "/photos", { method: "POST", headers: accountHeaders, body: form })).json()).id;
+const putCover = (regionId, body, accountHeaders = headers) => fetch(base + "/region-covers/" + regionId, {
+  method: "PUT",
+  headers: { ...accountHeaders, "Content-Type": "application/json" },
+  body: JSON.stringify(body),
+});
+const coverPhoto = await uploadAs(headers);
+assert.deepEqual(await (await fetch(base + "/region-covers", { headers })).json(), []);
+assert.equal((await putCover("50", { photoId: coverPhoto })).status, 200, "a 시·도 without trips may carry a map photo");
+assert.deepEqual(await (await fetch(base + "/region-covers", { headers })).json(), [
+  { regionId: "50", photoUrl: `/api/photos/${coverPhoto}`, thumbnailUrl: `/api/photos/${coverPhoto}/thumbnail` },
+]);
+assert.equal((await putCover("11110", { photoId: coverPhoto })).status, 400, "only 시·도 take a map photo");
+assert.equal((await putCover("99", { photoId: coverPhoto })).status, 400);
+assert.equal((await putCover("50", { photoId: crypto.randomUUID() })).status, 400);
+assert.equal((await putCover("50", {})).status, 400);
+assert.equal((await putCover("50", { photoId: coverPhoto }, otherHeaders)).status, 400, "another account cannot use the photo");
+assert.deepEqual(await (await fetch(base + "/region-covers", { headers: otherHeaders })).json(), []);
+assert.equal((await fetch(base + "/region-covers")).status, 401);
+assert.equal((await putCover("50", { photoId: coverPhoto }, { Cookie: cookie })).status, 403);
+// The trip's own photo as a map photo: deleting the trip later must keep it.
+assert.equal((await putCover("26", { photoId })).status, 200);
+const replacement = await uploadAs(headers);
+assert.equal((await putCover("50", { photoId: replacement })).status, 200);
+assert.equal((await fetch(base + "/photos/" + coverPhoto, { headers })).status, 404, "a replaced map photo is deleted");
+if (mediaRoot) assert.deepEqual(await mediaFiles(coverPhoto), [], "a replaced map photo leaves the disk");
+assert.equal((await fetch(base + "/region-covers/50", { method: "DELETE", headers })).status, 200);
+assert.equal((await fetch(base + "/region-covers/50", { method: "DELETE", headers })).status, 200, "removing twice is not an error");
+assert.equal((await fetch(base + "/photos/" + replacement + "/thumbnail", { headers })).status, 404, "a removed map photo is deleted");
+assert.deepEqual((await (await fetch(base + "/region-covers", { headers })).json()).map((cover) => cover.regionId), ["26"]);
 const changed = await fetch(base + "/trips/" + list[0].id, {
   method: "PATCH",
   headers: { ...headers, "Content-Type": "application/json" },
@@ -182,6 +213,8 @@ const deleted = await fetch(base + "/trips/" + list[0].id, {
 });
 assert.equal(deleted.status, 200);
 assert.equal((await (await fetch(base + "/trips", { headers })).json()).length, 0);
+assert.equal((await fetch(base + "/photos/" + photoId + "/thumbnail", { headers })).status, 200, "the 부산 map photo still uses the deleted trip's photo");
+assert.equal((await fetch(base + "/region-covers/26", { method: "DELETE", headers })).status, 200);
 assert.equal((await fetch(base + "/photos/" + photoId, { headers })).status, 404);
 assert.equal((await fetch(base + "/photos/" + photoId + "/thumbnail", { headers })).status, 404);
 if (mediaRoot) assert.deepEqual(await mediaFiles(photoId), [], "trip deletion removes original and thumbnail files");
@@ -192,6 +225,7 @@ assert.equal(leftover.status, 200);
 const { id: leftoverId } = await leftover.json();
 assert.equal((await fetch(base + "/photos/" + leftoverId + "/thumbnail", { headers: otherHeaders })).status, 200);
 if (mediaRoot) assert.equal((await mediaFiles(leftoverId)).length, 2);
+assert.equal((await putCover("42", { photoId: leftoverId }, otherHeaders)).status, 200, "account deletion must also clear map photos");
 for (const accountHeaders of [headers, otherHeaders]) {
   const removed = await fetch(base + "/auth/delete", {
     method: "POST",
@@ -203,5 +237,5 @@ for (const accountHeaders of [headers, otherHeaders]) {
 assert.equal((await fetch(base + "/photos/" + leftoverId + "/thumbnail", { headers: otherHeaders })).status, 401);
 if (mediaRoot) assert.deepEqual(await mediaFiles(leftoverId), [], "account deletion removes original and thumbnail files");
 console.log(
-  `PASS: public regions without session, 17 provinces + 250 districts + 3,627 neighborhoods, 10-digit multi-region trips, account-only upload/read, private photo cache, owner isolation, 320px cover/place thumbnail URLs and read/cache/owner isolation/cleanup on trip and account deletion${mediaRoot ? " (files checked on disk)" : ""}, place photo/location save/retain/remove, atomic retry, create/update/delete, stats, invalid dates/day count, request header protection, JSON error message`,
+  `PASS: public regions without session, 17 provinces + 250 districts + 3,627 neighborhoods, 10-digit multi-region trips, account-only upload/read, private photo cache, owner isolation, 320px cover/place thumbnail URLs and read/cache/owner isolation/cleanup on trip and account deletion${mediaRoot ? " (files checked on disk)" : ""}, 시·도 map photos (any 시·도, owner/level checks, replace/remove/trip/account cleanup), place photo/location save/retain/remove, atomic retry, create/update/delete, stats, invalid dates/day count, request header protection, JSON error message`,
 );

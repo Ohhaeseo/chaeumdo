@@ -1,5 +1,5 @@
 import { Fragment, type KeyboardEvent } from "react";
-import { districts, mostRecentTripForRegion, provinces, regionById, regionContains, regionIdsForTrip, type Region, type Trip } from "./data";
+import { districts, mostRecentTripForRegion, provinces, regionById, regionContains, regionIdsForTrip, type Region, type RegionCover, type Trip } from "./data";
 import { useJejuBoundaries, useMapBoundaries, type JejuBoundaries } from "./mapData";
 import { needsPhotoPin, shapeMetrics } from "./mapShape.mjs";
 
@@ -36,7 +36,12 @@ function MapLoadState({ error, retry }: { error: string; retry: () => void }) {
   return <div className="map-load-state" role="status" aria-live="polite"><span className="map-loading-mark" /><p>지도를 불러오고 있어요.</p></div>;
 }
 
-export default function KoreaMap({ trips, onProvince }: { trips: Trip[]; onProvince: (region: Region) => void }) {
+// The photo a 시·도 shows on the national map: the one the traveler picked, otherwise the most recent trip's.
+export function provincePhoto(region: Region, trips: Trip[], covers: Map<string, RegionCover>) {
+  return covers.get(region.id)?.thumbnailUrl ?? mostRecentTripForRegion(trips, region.id)?.thumbnailUrl;
+}
+
+export default function KoreaMap({ trips, covers, onProvince }: { trips: Trip[]; covers: Map<string, RegionCover>; onProvince: (region: Region) => void }) {
   const { boundaries, error, retry } = useMapBoundaries();
   if (!boundaries) return <MapLoadState error={error} retry={retry} />;
   const byId = new Map(provinces.map(region => [region.id, region]));
@@ -44,41 +49,59 @@ export default function KoreaMap({ trips, onProvince }: { trips: Trip[]; onProvi
     const region = byId.get(appProvinceId(id));
     if (!region) return [];
     const shape = metrics(path);
-    const trip = mostRecentTripForRegion(trips, region.id);
-    return [{ region, path, shape, trip, pinned: Boolean(trip) && needsPhotoPin(shape.area, PIN_RADIUS * 2) }];
+    // Visiting is decided by trips alone; a picked photo may fill a 시·도 that has none yet.
+    const visited = Boolean(mostRecentTripForRegion(trips, region.id));
+    const photo = provincePhoto(region, trips, covers);
+    return [{ region, path, shape, visited, photo, pinned: Boolean(photo) && needsPhotoPin(shape.area, PIN_RADIUS * 2) }];
   });
   return <svg className="korea-svg" viewBox="5 0 540 710" role="img" aria-label="대한민국 시·도 여행 지도">
-    <defs>{items.map(({ region, path, trip, pinned }) => trip && <Fragment key={region.id}>
+    <defs>{items.map(({ region, path, photo, pinned }) => photo && <Fragment key={region.id}>
       <clipPath id={`province-photo-${region.id}`}><path d={path} clipRule="evenodd" /></clipPath>
       {pinned && <clipPath id={`pin-${region.id}`}><circle cx={points[region.id][0]} cy={points[region.id][1]} r={PIN_PHOTO_RADIUS} /></clipPath>}
     </Fragment>)}</defs>
-    {items.map(({ region, path, shape, trip }) => <g key={region.id} className="province-region" {...pressable(() => onProvince(region))} aria-label={`${region.name}, ${trip ? "방문" : region.recommended ? "추천 여행지" : "미방문"}, 시·군·구 보기`}>
-      <path d={path} fill={trip ? "#E5E5E2" : region.recommended ? "#F7F7F5" : "#FFFFFF"} fillRule="evenodd" stroke="#696973" strokeWidth="1.4" className="province-path" />
-      {trip && <>
-        <image href={trip.thumbnailUrl} x={shape.main.x} y={shape.main.y} width={shape.main.width} height={shape.main.height} preserveAspectRatio="xMidYMid slice" clipPath={`url(#province-photo-${region.id})`} className="region-photo" />
+    {items.map(({ region, path, shape, visited, photo }) => <g key={region.id} className="province-region" {...pressable(() => onProvince(region))} aria-label={`${region.name}, ${visited ? "방문" : region.recommended ? "추천 여행지" : "미방문"}, 시·군·구 보기`}>
+      <path d={path} fill={photo ? "#E5E5E2" : region.recommended ? "#F7F7F5" : "#FFFFFF"} fillRule="evenodd" stroke="#696973" strokeWidth="1.4" className="province-path" />
+      {photo && <>
+        <image href={photo} x={shape.main.x} y={shape.main.y} width={shape.main.width} height={shape.main.height} preserveAspectRatio="xMidYMid slice" clipPath={`url(#province-photo-${region.id})`} className="region-photo" />
         {/* The photo covers the inner half of the border, so the border is drawn again on top. */}
         <path d={path} fill="none" stroke="#696973" strokeWidth="1.4" />
       </>}
     </g>)}
     <g pointerEvents="none">{boundaries.districts.map(district => <path key={district.id} d={district.path} fill="none" stroke="#E5E5E2" strokeWidth="0.8" />)}</g>
-    {items.map(({ region, trip, pinned }) => {
+    {items.map(({ region, photo, pinned }) => {
       const [x, y] = points[region.id];
-      if (!trip) return <text key={region.id} x={x} y={y} textAnchor="middle" className="map-label" pointerEvents="none">{region.name}</text>;
+      if (!photo) return <text key={region.id} x={x} y={y} textAnchor="middle" className="map-label" pointerEvents="none">{region.name}</text>;
       if (pinned) return null;
       const labelWidth = region.name.length * 12 + 16;
       return <g key={region.id} className="map-photo-label" pointerEvents="none"><rect x={x - labelWidth / 2} y={y - 10} width={labelWidth} height="20" rx="10" /><text x={x} y={y + 4} textAnchor="middle">{region.name}</text></g>;
     })}
     {/* Pins go last so a neighbour's label never covers a photo. The province shape stays the one tab stop. */}
-    {items.map(({ region, trip, pinned }) => {
-      if (!trip || !pinned) return null;
+    {items.map(({ region, photo, pinned }) => {
+      if (!photo || !pinned) return null;
       const [x, y] = points[region.id];
       const labelWidth = region.name.length * 12 + 16;
       return <g key={region.id} className="photo-marker" aria-hidden="true" onClick={() => onProvince(region)}>
         <circle cx={x} cy={y} r={PIN_RADIUS} fill="#FFFFFF" />
-        <image href={trip.thumbnailUrl} x={x - PIN_PHOTO_RADIUS} y={y - PIN_PHOTO_RADIUS} width={PIN_PHOTO_RADIUS * 2} height={PIN_PHOTO_RADIUS * 2} preserveAspectRatio="xMidYMid slice" clipPath={`url(#pin-${region.id})`} />
+        <image href={photo} x={x - PIN_PHOTO_RADIUS} y={y - PIN_PHOTO_RADIUS} width={PIN_PHOTO_RADIUS * 2} height={PIN_PHOTO_RADIUS * 2} preserveAspectRatio="xMidYMid slice" clipPath={`url(#pin-${region.id})`} />
         <g className="map-photo-label"><rect x={x - labelWidth / 2} y={y + 6} width={labelWidth} height="18" rx="9" /><text x={x} y={y + 19} textAnchor="middle">{region.name}</text></g>
       </g>;
     })}
+  </svg>;
+}
+
+// The 시·도 drawn alone, filled the way the national map fills it, so the photo sheet shows the actual crop.
+export function ProvincePhotoPreview({ province, photo }: { province: Region; photo?: string }) {
+  const { boundaries } = useMapBoundaries();
+  const path = boundaries?.provinces[(province.id === "42" ? "51" : province.id) as keyof typeof boundaries.provinces];
+  if (!path) return <div className="cover-preview-loading" />;
+  const bounds = pathBounds(path);
+  const shape = metrics(path);
+  const pad = Math.max(bounds.width, bounds.height) * .06;
+  return <svg className="cover-preview-svg" viewBox={`${bounds.x - pad} ${bounds.y - pad} ${bounds.width + pad * 2} ${bounds.height + pad * 2}`} role="img" aria-label={`${province.name} 지도 사진 미리보기`}>
+    <defs><clipPath id={`cover-preview-${province.id}`}><path d={path} clipRule="evenodd" /></clipPath></defs>
+    <path d={path} fill={photo ? "#E5E5E2" : "#FFFFFF"} fillRule="evenodd" />
+    {photo && <image href={photo} x={shape.main.x} y={shape.main.y} width={shape.main.width} height={shape.main.height} preserveAspectRatio="xMidYMid slice" clipPath={`url(#cover-preview-${province.id})`} />}
+    <path d={path} fill="none" stroke="#696973" strokeWidth="1.4" vectorEffect="non-scaling-stroke" />
   </svg>;
 }
 

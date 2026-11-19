@@ -3,7 +3,7 @@ import { ArrowLeft, ImagePlus, LoaderCircle, MapPin, Plus, Search, X } from "luc
 import { api, districts, neighborhoods, provinceIdForRegion, provinces, regionById, regionIdsForTrip, saveLocal, type PlaceLocation, type Region, type Trip } from "./data";
 import { inclusiveDays } from "./dates.mjs";
 import { searchPlaces, type PlaceSearchResult } from "./placeSearch";
-import { preparePhoto, prepareThumbnail } from "./photo";
+import { preparePhoto, prepareThumbnail, uploadPhoto } from "./photo";
 
 type PlacePhoto = File | string | null;
 type PlaceRow = { name: string; photo: PlacePhoto; location: PlaceLocation | null };
@@ -85,12 +85,6 @@ function PlaceSearchPicker({ value, location, day, index, onNameChange, onSelect
       {!busy && <a href="https://photon.komoot.io" target="_blank" rel="noreferrer">검색: Photon · © OpenStreetMap contributors</a>}
     </div>}
   </div>;
-}
-
-async function uploadPhoto(file: File): Promise<string> {
-  const form = new FormData();
-  form.append("file", await preparePhoto(file));
-  return (await api<{ id: string }>("/photos", { method: "POST", body: form })).id;
 }
 
 export default function TravelForm({ region, trip, mode, onBack, onSaved }: {

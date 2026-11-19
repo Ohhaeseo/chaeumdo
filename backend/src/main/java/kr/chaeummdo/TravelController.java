@@ -233,22 +233,71 @@ public class TravelController {
       if(db.sql("DELETE FROM trip WHERE id=:id AND owner_id=:owner").param("id",id).param("owner",user).update()!=1)
         throw new ResponseStatusException(HttpStatus.NOT_FOUND);
       List<String> keys=new ArrayList<>();
-      for(UUID photo:photos) {
-        List<String> variants=db.sql("SELECT object_key FROM photo_variant WHERE photo_id=:id").param("id",photo).query(String.class).list();
-        var deleted=db.sql("""
-          DELETE FROM photo WHERE id=:id AND owner_id=:owner
-          AND NOT EXISTS (SELECT 1 FROM trip WHERE cover_photo_id=:id)
-          AND NOT EXISTS (SELECT 1 FROM trip_place WHERE photo_id=:id)
-          RETURNING object_key
-          """).param("id",photo).param("owner",user).query(String.class).optional();
-        deleted.ifPresent(key->{keys.add(key);keys.addAll(variants);});
-      }
+      for(UUID photo:photos) keys.addAll(deleteUnusedPhoto(photo,user));
       return keys;
     });
-    for(String key:objectKeys) {
+    deleteFiles(objectKeys);
+  }
+  // Removes the photo unless a trip, a place or a map photo still uses it. Returns the file keys to delete after commit.
+  private List<String> deleteUnusedPhoto(UUID photo,UUID owner) {
+    List<String> variants=db.sql("SELECT object_key FROM photo_variant WHERE photo_id=:id").param("id",photo).query(String.class).list();
+    var deleted=db.sql("""
+      DELETE FROM photo WHERE id=:id AND owner_id=:owner
+      AND NOT EXISTS (SELECT 1 FROM trip WHERE cover_photo_id=:id)
+      AND NOT EXISTS (SELECT 1 FROM trip_place WHERE photo_id=:id)
+      AND NOT EXISTS (SELECT 1 FROM region_cover WHERE photo_id=:id)
+      RETURNING object_key
+      """).param("id",photo).param("owner",owner).query(String.class).optional();
+    List<String> keys=new ArrayList<>();
+    deleted.ifPresent(key->{keys.add(key);keys.addAll(variants);});
+    return keys;
+  }
+  private void deleteFiles(List<String> keys) {
+    for(String key:keys) {
       try { Files.deleteIfExists(root.resolve(key)); }
       catch(IOException ignored) { /* leftover file can be cleaned by media reconciliation */ }
     }
+  }
+  public record RegionCover(String regionId,String photoUrl,String thumbnailUrl) {}
+  public record RegionCoverInput(@NotNull UUID photoId) {}
+  private static RegionCover regionCover(String region,UUID photo) {
+    return new RegionCover(region,"/api/photos/"+photo,"/api/photos/"+photo+"/thumbnail");
+  }
+  // A 시·도 photo the traveler picked for the national map. It does not depend on trips, so it may be set for any 시·도.
+  @GetMapping("/region-covers") public List<RegionCover> regionCovers(HttpServletRequest req) {
+    return db.sql("SELECT region_id,photo_id FROM region_cover WHERE owner_id=:owner ORDER BY region_id")
+      .param("owner",owner(req)).query((rs,n)->regionCover(rs.getString("region_id"),rs.getObject("photo_id",UUID.class))).list();
+  }
+  @PutMapping("/region-covers/{regionId}") public RegionCover setRegionCover(@PathVariable String regionId,@Valid @RequestBody RegionCoverInput input,HttpServletRequest req) {
+    UUID user=owner(req);
+    if(db.sql("SELECT count(*) FROM region WHERE id=:id AND level='province'").param("id",regionId).query(Integer.class).single()!=1)
+      throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"시·도를 확인해 주세요.");
+    List<String> keys=tx.execute(status->{
+      // Serialize changes for the same traveler, so a replaced photo is always cleaned up.
+      db.sql("SELECT id FROM traveler WHERE id=:id FOR UPDATE").param("id",user).query(UUID.class).single();
+      if(db.sql("SELECT count(*) FROM photo WHERE id=:id AND owner_id=:owner AND status='READY'").param("id",input.photoId()).param("owner",user).query(Integer.class).single()!=1)
+        throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"사진을 다시 선택해 주세요.");
+      var previous=db.sql("SELECT photo_id FROM region_cover WHERE owner_id=:owner AND region_id=:region")
+        .param("owner",user).param("region",regionId).query(UUID.class).optional();
+      db.sql("""
+        INSERT INTO region_cover(owner_id,region_id,photo_id) VALUES(:owner,:region,:photo)
+        ON CONFLICT (owner_id,region_id) DO UPDATE SET photo_id=EXCLUDED.photo_id,updated_at=now()
+        """).param("owner",user).param("region",regionId).param("photo",input.photoId()).update();
+      return previous.filter(old->!old.equals(input.photoId())).map(old->deleteUnusedPhoto(old,user)).orElse(List.of());
+    });
+    deleteFiles(keys);
+    return regionCover(regionId,input.photoId());
+  }
+  // Back to the most recent trip's photo. Removing a cover that is not there is not an error.
+  @DeleteMapping("/region-covers/{regionId}") public void deleteRegionCover(@PathVariable String regionId,HttpServletRequest req) {
+    UUID user=owner(req);
+    List<String> keys=tx.execute(status->{
+      db.sql("SELECT id FROM traveler WHERE id=:id FOR UPDATE").param("id",user).query(UUID.class).single();
+      return db.sql("DELETE FROM region_cover WHERE owner_id=:owner AND region_id=:region RETURNING photo_id")
+        .param("owner",user).param("region",regionId).query(UUID.class).optional()
+        .map(photo->deleteUnusedPhoto(photo,user)).orElse(List.of());
+    });
+    deleteFiles(keys);
   }
   @PostMapping("/photos") public Map<String,UUID> upload(@RequestParam("file") MultipartFile file,HttpServletRequest req) throws IOException {
     UUID user=owner(req);
