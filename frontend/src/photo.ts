@@ -1,3 +1,4 @@
+import { api } from "./data";
 import { fitWithin } from "./photoSize.mjs";
 
 const MAX_EDGE = 2048;
@@ -45,6 +46,13 @@ export async function preparePhoto(file: File): Promise<File> {
   } catch {
     throw new Error(READ_FAILED);
   }
+}
+
+// Shrinks a picked photo and uploads it to the account; the server makes its thumbnail.
+export async function uploadPhoto(file: File): Promise<string> {
+  const form = new FormData();
+  form.append("file", await preparePhoto(file));
+  return (await api<{ id: string }>("/photos", { method: "POST", body: form })).id;
 }
 
 // The small copy that maps and record cards draw. Like the server, it is made from the prepared photo.

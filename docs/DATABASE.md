@@ -16,6 +16,9 @@ erDiagram
   region ||--o{ trip_region : links
   trip ||--|{ trip_region : visits
   photo ||--o{ trip : cover
+  photo ||--o{ region_cover : "map photo"
+  traveler ||--o{ region_cover : picks
+  region ||--o{ region_cover : shows
   photo ||--o{ photo_variant : derives
   trip ||--|{ trip_day : includes
   trip_day ||--o{ trip_place : lists
@@ -32,10 +35,11 @@ erDiagram
 | trip_place | 여행 ID + DAY 번호 + 순번, 장소명, 선택적 장소 사진 ID·위도·경도·주소·OpenStreetMap 출처 ID, 소유자 ID |
 | photo | 소유자, object_key, MIME, 바이트, 가로·세로, 처리 상태 |
 | photo_variant | 사진 ID + THUMBNAIL/DISPLAY, 파생 파일 키와 크기. 현재는 업로드 때 THUMBNAIL만 만든다 |
+| region_cover | 소유자 + 시·도 ID(PK), 전국 지도에 쓸 사진 ID, 변경 시각. 소유자 삭제 시 CASCADE, `(photo_id, owner_id)` 복합 FK는 사진 삭제 시 CASCADE |
 
 지역은 `province`, `district`, `neighborhood` 3단계 계층으로 저장한다. 시·도는 기존 2자리 내부 코드, 시·군·구는 5자리 경계 코드, 읍·면·동은 10자리 행정동 코드를 사용하며 `parent_id`로 바로 위 단계에 연결한다. V7은 기존 키를 보존하면서 지역 외래 키를 10자리로 확장하고 2026-03-25 시행본 행정 읍·면·동 3,627개를 추가한다.
 
-실행 가능한 정의: `backend/src/main/resources/db/migration/V1__travel_schema.sql`부터 `V8__traveler_sessions.sql`까지다. V5는 기존 `trip.region_id`를 `trip_region`의 첫 지역으로 이관하고, 이후 한 여행에 최대 10개 지역을 순서대로 연결한다. V6는 장소에 선택적 좌표·주소·출처 식별자를 추가하고 좌표 쌍과 범위를 제약한다. V7은 읍·면·동 계층과 10자리 지역 키를 추가한다. V8은 아래 [세션](#세션)을 기기별 행으로 나눈다. 아이디는 대소문자를 구분하지 않는 고유 인덱스, 복구 코드 해시는 고유 인덱스로 보호한다. 익명 traveler 행은 계정 필수화 이전 세션의 가입 시 기록 승계를 위해 남기며, 새 익명 행은 더 이상 만들지 않는다. 로그인 잠금 여부는 DB 시각 기준(`locked_until > now()`)으로 판단한다. 장소 사진은 기존 `photo` 저장소를 재사용하며 `(photo_id, owner_id)` 복합 외래 키로 타인 사진 연결을 막는다. 한 장소에는 현재 사진 한 장을 연결할 수 있다.
+실행 가능한 정의: `backend/src/main/resources/db/migration/V1__travel_schema.sql`부터 `V9__region_covers.sql`까지다. V9는 시·도별 지도 사진 `region_cover`를 추가한다. 기록과 독립된 테이블이라 기록이 없는 시·도에도 사진을 둘 수 있고, 시·도만 받는다는 제약은 API에서 검사한다. V5는 기존 `trip.region_id`를 `trip_region`의 첫 지역으로 이관하고, 이후 한 여행에 최대 10개 지역을 순서대로 연결한다. V6는 장소에 선택적 좌표·주소·출처 식별자를 추가하고 좌표 쌍과 범위를 제약한다. V7은 읍·면·동 계층과 10자리 지역 키를 추가한다. V8은 아래 [세션](#세션)을 기기별 행으로 나눈다. 아이디는 대소문자를 구분하지 않는 고유 인덱스, 복구 코드 해시는 고유 인덱스로 보호한다. 익명 traveler 행은 계정 필수화 이전 세션의 가입 시 기록 승계를 위해 남기며, 새 익명 행은 더 이상 만들지 않는다. 로그인 잠금 여부는 DB 시각 기준(`locked_until > now()`)으로 판단한다. 장소 사진은 기존 `photo` 저장소를 재사용하며 `(photo_id, owner_id)` 복합 외래 키로 타인 사진 연결을 막는다. 한 장소에는 현재 사진 한 장을 연결할 수 있다.
 
 ## 세션
 
@@ -56,8 +60,9 @@ V7까지는 `traveler.access_token_hash`(NOT NULL UNIQUE) 한 칸이 세션이�
 - `(owner_id, region_id, start_date DESC, created_at DESC)` 인덱스로 지역별 최근 기록을 조회한다.
 - `(owner_id, created_at DESC, id)`는 향후 cursor 조회용이다.
 - 미참조 정리는 `(status, created_at)`와 trip의 cover_photo_id 인덱스를 사용한다.
-- 기록 삭제는 트랜잭션 안에서 소유자를 확인하고 연결 사진 후보를 수집한다. 삭제 후 다른 기록·장소가 참조하지 않는 사진 행과 variant만 제거하며 저장소 파일은 커밋 뒤 최선 노력으로 정리한다.
-- 계정 삭제는 소유자의 photo와 photo_variant 파일 키를 함께 모은 뒤 행을 지우고(variant 행은 FK cascade), 커밋 뒤 원본과 썸네일 파일을 지운다.
+- 기록 삭제는 트랜잭션 안에서 소유자를 확인하고 연결 사진 후보를 수집한다. 삭제 후 다른 기록·장소·지도 사진(`region_cover`)이 참조하지 않는 사진 행과 variant만 제거하며 저장소 파일은 커밋 뒤 최선 노력으로 정리한다.
+- 지도 사진을 바꾸거나 지우면 같은 규칙으로 이전 사진을 정리한다. 같은 사용자의 지도 사진 변경은 traveler 행 잠금으로 직렬화해, 동시에 바꿔도 밀려난 사진이 정리되지 않고 남지 않게 한다.
+- 계정 삭제는 소유자의 photo와 photo_variant 파일 키를 함께 모은 뒤 행을 지우고(variant·region_cover 행은 FK cascade), 커밋 뒤 원본과 썸네일 파일을 지운다.
 - 통계: `trip_region`의 고유 지역 수, `trip` 수, `sum(end_date - start_date + 1)`을 각각 계산해 다중 지역 때문에 여행 횟수·일수가 중복되지 않게 한다.
 - timestamps는 TIMESTAMPTZ, 여행 날짜는 DATE. 사용자 화면은 날짜를 시간대로 변환하지 않는다.
 
@@ -72,7 +77,7 @@ V7까지는 `traveler.access_token_hash`(NOT NULL UNIQUE) 한 칸이 세션이�
 - 축소는 절반씩 단계적으로 줄이며 bilinear 보간을 쓴다. 2048→320을 한 번에 줄이면 보간이 픽셀을 건너뛰어 계단 현상이 생긴다. 측정 예: 2048×1536 JPEG 원본 84.7KB → 썸네일 320×240 5.7KB.
 - `GET /api/photos/{id}/thumbnail`은 원본 조회와 같은 소유자 검사와 캐시 헤더(`private, immutable`, 1년, `Vary: Cookie`)를 쓴다. 변형 행이 없는 이전 사진은 같은 주소로 원본 파일을 돌려준다. 나중에 백필로 썸네일을 만들어도 이미 캐시한 브라우저는 같은 사진의 큰 파일을 계속 쓸 수 있다. 내용은 같고 전송량만 다르므로 허용한다. 기존 사진의 백필은 하지 않았다.
 - 기록 조회 응답의 `thumbnailUrl`은 지도 채우기·핀과 기록 카드가 쓰고, 지역 화면·상세 화면의 대표 사진은 원본 `photoUrl`을 쓴다. 상세 화면의 31px 장소 사진 칸은 `placePhotoThumbnailUrls`를 쓴다. `placePhotoUrls`는 원본 주소로 남겨 두는데, 기록 수정 폼이 이 주소의 마지막 부분을 사진 ID로 다시 보내기 때문이다.
-- 체험 모드는 IndexedDB 레코드에 `thumbnail` Blob(긴 변 320px JPEG, 품질 0.82)과 장소별 `placeThumbnails` Blob을 함께 저장한다. 서버와 같이 브라우저에서 준비한 2048px 사진으로 만든다. 썸네일이 없는 이전 레코드는 원본을 쓰고, 사진을 바꾸지 않고 수정·저장하면 그때 썸네일을 만든다. 수정 폼에서 장소를 지우거나 옮겨도 남은 장소 사진의 썸네일은 사진 주소로 찾아 그대로 옮긴다. 선택 필드를 추가했을 뿐이라 IndexedDB 버전은 올리지 않았다.
+- 체험 모드는 IndexedDB 레코드에 `thumbnail` Blob(긴 변 320px JPEG, 품질 0.82)과 장소별 `placeThumbnails` Blob을 함께 저장한다. 서버와 같이 브라우저에서 준비한 2048px 사진으로 만든다. 썸네일이 없는 이전 레코드는 원본을 쓰고, 사진을 바꾸지 않고 수정·저장하면 그때 썸네일을 만든다. 수정 폼에서 장소를 지우거나 옮겨도 남은 장소 사진의 썸네일은 사진 주소로 찾아 그대로 옮긴다. 선택 필드를 추가했을 뿐이라 IndexedDB 버전은 올리지 않았다. 시·도 지도 사진은 IndexedDB 버전 2에서 추가한 `regionCovers` 저장소(키 `regionId`)에 원본·썸네일 Blob으로 둔다. 버전 1 데이터베이스는 기존 `trips`를 그대로 두고 저장소만 추가된다.
 
 ## 대량 사진 운영 흐름 — 설계, 미구현
 

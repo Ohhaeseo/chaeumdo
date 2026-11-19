@@ -28,6 +28,12 @@ export type Trip = {
   placePhotoThumbnailUrls?: (string | null)[][];
   placeLocations?: (PlaceLocation | null)[][];
 };
+// A photo picked for a 시·도 on the national map. Without one the map shows the most recent trip's photo.
+export type RegionCover = {
+  regionId: string;
+  photoUrl: string;
+  thumbnailUrl: string;
+};
 export type PlaceLocation = {
   latitude: number;
   longitude: number;
@@ -136,14 +142,50 @@ type StoredTrip = LocalTrip & {
   placePhotos?: (Blob | null)[][];
   placeThumbnails?: (Blob | null)[][];
 };
+type StoredRegionCover = { regionId: string; photo: Blob; thumbnail: Blob };
+// Version 2 adds the 시·도 map photos; devices that already hold trips keep them.
 function openDB(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
-    const request = indexedDB.open("chaeummdo-demo", 1);
-    request.onupgradeneeded = () =>
-      request.result.createObjectStore("trips", { keyPath: "id" });
+    const request = indexedDB.open("chaeummdo-demo", 2);
+    request.onupgradeneeded = () => {
+      const db = request.result;
+      if (!db.objectStoreNames.contains("trips")) db.createObjectStore("trips", { keyPath: "id" });
+      if (!db.objectStoreNames.contains("regionCovers")) db.createObjectStore("regionCovers", { keyPath: "regionId" });
+    };
     request.onsuccess = () => resolve(request.result);
     request.onerror = () => reject(request.error);
   });
+}
+async function writeLocal(store: string, change: (objects: IDBObjectStore) => void) {
+  const db = await openDB();
+  await new Promise<void>((resolve, reject) => {
+    const tx = db.transaction(store, "readwrite");
+    change(tx.objectStore(store));
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+    tx.onabort = () => reject(tx.error);
+  });
+  db.close();
+}
+export async function localRegionCovers(): Promise<RegionCover[]> {
+  const db = await openDB();
+  const values = await new Promise<StoredRegionCover[]>((resolve, reject) => {
+    const r = db.transaction("regionCovers").objectStore("regionCovers").getAll();
+    r.onsuccess = () => resolve(r.result);
+    r.onerror = () => reject(r.error);
+  });
+  db.close();
+  return values.map(({ regionId, photo, thumbnail }) => ({
+    regionId,
+    photoUrl: URL.createObjectURL(photo),
+    thumbnailUrl: URL.createObjectURL(thumbnail),
+  }));
+}
+export function saveLocalRegionCover(regionId: string, photo: Blob, thumbnail: Blob) {
+  return writeLocal("regionCovers", objects => objects.put({ regionId, photo, thumbnail } satisfies StoredRegionCover));
+}
+export function deleteLocalRegionCover(regionId: string) {
+  return writeLocal("regionCovers", objects => objects.delete(regionId));
 }
 export async function localTrips(): Promise<Trip[]> {
   const db = await openDB();
@@ -174,27 +216,11 @@ export async function localTrips(): Promise<Trip[]> {
       };
     });
 }
-export async function saveLocal(trip: LocalTrip, photo: Blob, thumbnail: Blob, placePhotos: (Blob | null)[][], placeThumbnails: (Blob | null)[][]) {
-  const db = await openDB();
-  await new Promise<void>((resolve, reject) => {
-    const tx = db.transaction("trips", "readwrite");
-    tx.objectStore("trips").put({ ...trip, photo, thumbnail, placePhotos, placeThumbnails });
-    tx.oncomplete = () => resolve();
-    tx.onerror = () => reject(tx.error);
-    tx.onabort = () => reject(tx.error);
-  });
-  db.close();
+export function saveLocal(trip: LocalTrip, photo: Blob, thumbnail: Blob, placePhotos: (Blob | null)[][], placeThumbnails: (Blob | null)[][]) {
+  return writeLocal("trips", objects => objects.put({ ...trip, photo, thumbnail, placePhotos, placeThumbnails } satisfies StoredTrip));
 }
-export async function deleteLocal(id: string) {
-  const db = await openDB();
-  await new Promise<void>((resolve, reject) => {
-    const tx = db.transaction("trips", "readwrite");
-    tx.objectStore("trips").delete(id);
-    tx.oncomplete = () => resolve();
-    tx.onerror = () => reject(tx.error);
-    tx.onabort = () => reject(tx.error);
-  });
-  db.close();
+export function deleteLocal(id: string) {
+  return writeLocal("trips", objects => objects.delete(id));
 }
 export class ApiError extends Error {
   constructor(readonly status: number, message: string) {
