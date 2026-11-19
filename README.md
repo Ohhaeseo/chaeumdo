@@ -8,6 +8,7 @@
 내가 다녀온 대한민국을 지도 위에서 한눈에 확인해 보세요.
 
 **박정윤 기획**
+**오해서 개발**
 
 ![React](https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=111111)
 ![TypeScript](https://img.shields.io/badge/TypeScript-5-3178C6?logo=typescript&logoColor=white)
