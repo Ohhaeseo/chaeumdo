@@ -1,4 +1,5 @@
 import { type PlaceLocation } from "./data";
+import { placeSearch } from "./providers";
 
 export type PlaceSearchResult = { name: string; location: PlaceLocation };
 type PhotonFeature = {
@@ -6,7 +7,7 @@ type PhotonFeature = {
   properties?: Record<string, string | number | undefined>;
 };
 
-const endpoint = import.meta.env.VITE_PLACE_SEARCH_URL || "https://photon.komoot.io/api";
+const endpoint = placeSearch.url;
 const cache = new Map<string, PlaceSearchResult[]>();
 
 function addressOf(properties: Record<string, string | number | undefined>) {

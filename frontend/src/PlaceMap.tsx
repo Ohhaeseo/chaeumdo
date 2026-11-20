@@ -1,4 +1,5 @@
 import { type PlaceLocation } from "./data";
+import { mapTiles, tileUrl } from "./providers";
 
 const TILE_SIZE = 256;
 const MAP_WIDTH = 330;
@@ -42,7 +43,7 @@ export default function PlaceMap({ places }: { places: { name: string; location:
   for (let y = firstTileY; y <= lastTileY; y++) for (let x = firstTileX; x <= lastTileX; x++) {
     if (y < 0 || y >= tileCount) continue;
     const wrappedX = ((x % tileCount) + tileCount) % tileCount;
-    tiles.push(<img key={`${x}-${y}`} src={`https://tile.openstreetmap.org/${view.zoom}/${wrappedX}/${y}.png`} alt="" loading="lazy" style={{ left: x * TILE_SIZE - left, top: y * TILE_SIZE - top }} />);
+    tiles.push(<img key={`${x}-${y}`} src={tileUrl(view.zoom, wrappedX, y)} alt="" loading="lazy" style={{ left: x * TILE_SIZE - left, top: y * TILE_SIZE - top }} />);
   }
   return <section className="place-map-section" aria-label="방문 장소 지도">
     <div className="place-map" style={{ "--map-width": `${MAP_WIDTH}px`, "--map-height": `${MAP_HEIGHT}px` } as React.CSSProperties}>
@@ -51,7 +52,7 @@ export default function PlaceMap({ places }: { places: { name: string; location:
         const point = project(place.location.latitude, place.location.longitude, view.zoom);
         return <span className="place-map-pin" key={`${place.location.sourceId}-${index}`} style={{ left: point.x - left, top: point.y - top }} title={place.name}><i><em>{index + 1}</em></i><b>{place.name}</b></span>;
       })}
-      <a className="osm-attribution" href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer">© OpenStreetMap</a>
+      <a className="osm-attribution" href={mapTiles.attributionUrl} target="_blank" rel="noreferrer">{mapTiles.attribution}</a>
     </div>
   </section>;
 }

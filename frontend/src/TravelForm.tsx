@@ -4,6 +4,7 @@ import { api, districts, neighborhoods, provinceIdForRegion, provinces, regionBy
 import { dayDate, inclusiveDays, stayLabel } from "./dates.mjs";
 import { searchPlaces, type PlaceSearchResult } from "./placeSearch";
 import { preparePhoto, prepareThumbnail, uploadPhoto } from "./photo";
+import { placeSearch } from "./providers";
 
 type PlacePhoto = File | string | null;
 type PlaceRow = { name: string; photo: PlacePhoto; location: PlaceLocation | null };
@@ -76,7 +77,7 @@ function PlaceSearchPicker({ value, location, day, index, onNameChange, onSelect
       {!busy && results.map((result, resultIndex) => <button type="button" role="option" key={`${result.location.sourceId}-${resultIndex}`} onClick={() => { onSelect(result); setOpen(false); }}>
         <b>{result.name}</b><small>{result.location.address}</small>
       </button>)}
-      {!busy && <a href="https://photon.komoot.io" target="_blank" rel="noreferrer">검색: Photon · © OpenStreetMap contributors</a>}
+      {!busy && <a href={placeSearch.attributionUrl} target="_blank" rel="noreferrer">{placeSearch.attribution}</a>}
     </div>}
   </div>;
 }

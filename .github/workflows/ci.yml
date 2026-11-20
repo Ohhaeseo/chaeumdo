@@ -181,6 +181,24 @@ jobs:
           exit 1
       - name: gzip and cache headers through Caddy
         run: node scripts/smoke-stack.mjs
+      - name: Backup service wrote a restorable backup
+        # The backup service backs up once at start (scripts/backup.sh) into ./backups on the host.
+        run: |
+          dir=""
+          for second in $(seq 1 60); do
+            dir=$(ls -d backups/20* 2>/dev/null | tail -1)
+            [ -n "$dir" ] && break
+            sleep 1
+          done
+          if [ -z "$dir" ]; then
+            echo "::error::the backup service wrote nothing to ./backups"
+            docker compose --env-file "$STACK_ENV" logs backup
+            exit 1
+          fi
+          (cd "$dir" && sha256sum -c SHA256SUMS)
+          docker compose --env-file "$STACK_ENV" exec -T db pg_restore --list < "$dir/db.dump" > /dev/null
+          tar -tzf "$dir/media.tar.gz" > /dev/null
+          echo "Backup $dir is complete and readable"
       - name: API smoke through Caddy and Nginx
         env:
           API_URL: https://localhost:8443/api

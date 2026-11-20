@@ -127,3 +127,15 @@ DB에서 세션의 `expires_at`을 과거로 바꾸면 쿠키가 남아 있어�
 - 삭제 확인창: 뒤로 → 창만 닫힘. 삭제 → 지역 화면, 다시 뒤로 → 부산(지운 상세로 가지 않음). 지도 사진 시트와 계정 삭제 확인창도 뒤로가기로 닫혔다.
 
 검증 범위 밖: 실제 안드로이드 뒤로 버튼과 iOS 스와이프 제스처(같은 popstate지만 실기기에서는 확인하지 않았다).
+
+2026-11-20 운영 안정화 검증(배포 준비 1단계):
+
+- **로그·백업 구성**: 운영 compose의 모든 서비스에 로그 크기 제한(10MB × 5)을 넣고, `backup` 서비스를 추가했다. Docker 엔진이 꺼져 있어 compose 전체 실행은 CI의 containers 작업에 맡겼다. CI는 이제 백업 서비스가 만든 백업의 체크섬, `pg_restore --list`, 아카이브 목록도 확인한다.
+- **백업 스크립트**: `scripts/backup.sh`를 PostgreSQL 18 임시 클러스터(`127.0.0.1:55901`)와 사진 폴더로 직접 실행했다. `db.dump`·`media.tar.gz`·`SHA256SUMS`가 만들어졌고 체크섬이 맞았다. 20일 된 가짜 백업 폴더는 보관 기간(14일)에 따라 지워졌다.
+- **복원**: 새 DB에 `pg_restore --clean`으로 복원하자 계정 6·사진 4·기록 2·지역 3,894·Flyway v9가 원본과 같았다. 사진 8개 파일도 `diff -r`로 같음을 확인했다. `scripts/restore.sh`의 compose 명령은 Docker가 없어 실행하지 못했다.
+- **사진 자동 정리**: 정리 간격을 줄인 백엔드(유예 1분, 시작 45초 뒤)를 띄워 `PhotoJanitor`를 확인했다. 로그는 "Removed 1 unlinked photos and 2 stray media files"였다.
+  - 지운 것: 이틀 전으로 만든 미연결 사진의 행과 파일 2개, DB 행이 없는 오래된 파일 2개, 빈 소유자 폴더
+  - 남긴 것: 방금 올린 사진, 기록에 연결된 사진 2장, 이름 규칙에 맞지 않는 `notes.txt`
+- **업로드 한도**: 화소 한도를 2,500만으로 낮추고 동시 디코딩을 2장으로 제한했다. 같은 계정에서 동시에 올린 4장이 모두 200으로 저장됐다. 운영 프로필 백엔드에서 `smoke-api.mjs`와 `smoke-account.mjs`도 통과했다.
+- **공급자 설정**: 지도 타일·장소 검색 공급자를 빌드 인자로 뺐다. 예시 주소로 빌드하자 번들에 새 타일 주소와 출처 문구가 들어갔다. 이미지 빌드의 CSP 치환은 `img-src https://api.vworld.kr`, `connect-src https://photon.example.kr`로 바뀌었고, 값이 비면 기본값이 유지됐다. React 테스트 14개와 build를 통과했다.
+- **의존성 업데이트**: Dependabot 설정(npm, maven, actions, docker, docker-compose, 주 1회, minor/patch 묶음)을 추가했다.

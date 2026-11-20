@@ -1,7 +1,15 @@
+# Docker keeps container logs forever by default; each service keeps at most 5 × 10 MB.
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "5"
+
 services:
   db:
     image: postgres:17-alpine
     restart: unless-stopped
+    logging: *logging
     environment:
       POSTGRES_DB: chaeummdo
       POSTGRES_USER: chaeummdo
@@ -17,6 +25,7 @@ services:
   backend:
     build: ./backend
     restart: unless-stopped
+    logging: *logging
     environment:
       SPRING_PROFILES_ACTIVE: prod
       DB_URL: jdbc:postgresql://db:5432/chaeummdo
@@ -30,8 +39,18 @@ services:
         condition: service_healthy
 
   frontend:
-    build: ./frontend
+    build:
+      context: ./frontend
+      # Map tiles and place search providers (docs/DEPLOYMENT.md). Empty values keep OpenStreetMap and Photon.
+      args:
+        VITE_MAP_TILE_URL: ${MAP_TILE_URL:-}
+        VITE_MAP_ATTRIBUTION: ${MAP_ATTRIBUTION:-}
+        VITE_MAP_ATTRIBUTION_URL: ${MAP_ATTRIBUTION_URL:-}
+        VITE_PLACE_SEARCH_URL: ${PLACE_SEARCH_URL:-}
+        VITE_PLACE_SEARCH_ATTRIBUTION: ${PLACE_SEARCH_ATTRIBUTION:-}
+        VITE_PLACE_SEARCH_ATTRIBUTION_URL: ${PLACE_SEARCH_ATTRIBUTION_URL:-}
     restart: unless-stopped
+    logging: *logging
     depends_on:
       backend:
         condition: service_healthy
@@ -39,6 +58,7 @@ services:
   caddy:
     image: caddy:2-alpine
     restart: unless-stopped
+    logging: *logging
     environment:
       DOMAIN: ${DOMAIN:?DOMAIN is required}
     ports:
@@ -51,6 +71,29 @@ services:
       - caddy-config:/config
     depends_on:
       frontend:
+        condition: service_healthy
+
+  # Database dump and photo archive as one pair, at start and then once a day (scripts/backup.sh).
+  # BACKUP_DIR on the host still has to be copied off this server; see docs/DEPLOYMENT.md.
+  backup:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    logging: *logging
+    entrypoint: ["/bin/sh", "/opt/backup.sh", "--daily"]
+    environment:
+      PGHOST: db
+      PGUSER: chaeummdo
+      PGDATABASE: chaeummdo
+      PGPASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      BACKUP_KEEP_DAYS: ${BACKUP_KEEP_DAYS:-14}
+      MEDIA_DIR: /media
+      BACKUP_ROOT: /backups
+    volumes:
+      - ./scripts/backup.sh:/opt/backup.sh:ro
+      - media-data:/media:ro
+      - ${BACKUP_DIR:-./backups}:/backups
+    depends_on:
+      db:
         condition: service_healthy
 
 volumes:

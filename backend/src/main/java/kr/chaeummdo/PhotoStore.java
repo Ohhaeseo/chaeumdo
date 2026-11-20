@@ -15,6 +15,8 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.*;
+import java.util.concurrent.Semaphore;
+import java.util.concurrent.TimeUnit;
 
 // Photo rows and the files they point at. Trip covers, place photos and 시·도 map photos all share the
 // photo table, so ownership checks, uploads and cleanup live here rather than in each controller.
@@ -22,19 +24,29 @@ import java.util.*;
 public class PhotoStore {
   static final int THUMBNAIL_EDGE = 320;
   static final long MAX_BYTES = 15_728_640;
-  static final long MAX_PIXELS = 40_000_000;
+  // A decoded photo takes 3–4 bytes per pixel, so this keeps one upload under about 100 MB of memory.
+  // The web app shrinks photos to a 2048px long edge (about 3 million pixels) before uploading.
+  static final long MAX_PIXELS = 25_000_000;
 
   public record StoredFile(Path path, String contentType) {}
 
   private final JdbcClient db;
   private final TransactionTemplate tx;
   private final Path root;
+  // Uploads beyond this many wait for a decoder instead of all holding full-size images at once.
+  private final Semaphore decoders;
 
-  public PhotoStore(JdbcClient db, TransactionTemplate tx, @Value("${app.media-root}") String root) throws IOException {
+  public PhotoStore(JdbcClient db, TransactionTemplate tx, @Value("${app.media-root}") String root,
+                    @Value("${app.photo-decode-concurrency:2}") int decodeConcurrency) throws IOException {
     this.db = db;
     this.tx = tx;
     this.root = Path.of(root).toAbsolutePath().normalize();
+    this.decoders = new Semaphore(Math.max(1, decodeConcurrency), true);
     Files.createDirectories(this.root);
+  }
+
+  Path root() {
+    return root;
   }
 
   // A photo can be linked only by its owner, and only once it is fully stored.
@@ -64,7 +76,22 @@ public class PhotoStore {
       }
     }
     if (!Set.of("jpeg", "png").contains(format) || width < 1 || height < 1 || (long) width * height > MAX_PIXELS)
-      throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "JPEG·PNG, 4천만 화소 이하 사진을 선택해 주세요.");
+      throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "JPEG·PNG, 2,500만 화소 이하 사진을 선택해 주세요.");
+    try {
+      if (!decoders.tryAcquire(30, TimeUnit.SECONDS))
+        throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "사진을 처리하는 중이에요. 잠시 후 다시 시도해 주세요.");
+    } catch (InterruptedException e) {
+      Thread.currentThread().interrupt();
+      throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "사진을 처리하는 중이에요. 잠시 후 다시 시도해 주세요.");
+    }
+    try {
+      return store(file, owner, format, width, height);
+    } finally {
+      decoders.release();
+    }
+  }
+
+  private UUID store(MultipartFile file, UUID owner, String format, int width, int height) throws IOException {
     UUID id = UUID.randomUUID();
     String key = owner + "/" + id + "." + format;
     String thumbnailKey = owner + "/" + id + "-thumbnail." + format;
