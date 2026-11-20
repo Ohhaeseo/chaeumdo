@@ -16,7 +16,8 @@ assert.match(entry.headers.get("strict-transport-security") ?? "", /max-age=/, `
 assert.ok(entry.headers.get("content-security-policy"), `Nginx security headers missing: ${shown(entry)}`);
 const script = (await entry.text()).match(/<script[^>]+src="(\/assets\/[^"]+\.js)"/)?.[1];
 assert.ok(script, "index.html must load a hashed /assets/*.js entry");
-for (const path of ["/", "/index.html", "/spa/route/fallback"]) {
+// App screens have URLs (frontend/src/navigation.mjs); a refresh or a shared link must get the app, not a 404.
+for (const path of ["/", "/index.html", "/spa/route/fallback", "/my", "/provinces/26", "/regions/26350/trips/00000000-0000-4000-8000-000000000000/edit", "/new?region=26350"]) {
   const page = path === "/" ? entry : await get(path);
   assert.equal(page.headers.get("cache-control"), "no-cache", `${path} must revalidate index.html: ${shown(page)}`);
   assert.match(page.headers.get("content-type") ?? "", /^text\/html/, `${path}: ${shown(page)}`);

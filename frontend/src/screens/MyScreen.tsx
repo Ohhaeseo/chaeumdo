@@ -1,7 +1,5 @@
-import { useState } from "react";
 import { MoreHorizontal, UserRound } from "lucide-react";
 import { districts, regionById, type Region } from "../data";
-import { DeleteAccountDialog } from "../dialogs";
 import type { TravelStats } from "../travelStats";
 import type { Mode } from "../useTravelData";
 
@@ -14,9 +12,8 @@ export default function MyScreen({ displayName, tripCount, stats, mode, onMenu, 
   onProvince: (region: Region) => void;
   onLogout: () => void;
   onAccountMode: () => void;
-  onDeleteAccount: (password: string) => Promise<void>;
+  onDeleteAccount: () => void;
 }) {
-  const [deleteOpen, setDeleteOpen] = useState(false);
   const top = stats.topDistrict;
   return <>
     <header className="topbar"><h1>나</h1><button aria-label="더보기" onClick={onMenu}><MoreHorizontal /></button></header>
@@ -49,9 +46,8 @@ export default function MyScreen({ displayName, tripCount, stats, mode, onMenu, 
     </section>
     <div className="account-actions">
       {mode === "server"
-        ? <><button onClick={onLogout}>로그아웃</button><button className="danger" onClick={() => setDeleteOpen(true)}>계정 삭제</button></>
+        ? <><button onClick={onLogout}>로그아웃</button><button className="danger" onClick={onDeleteAccount}>계정 삭제</button></>
         : <button onClick={onAccountMode}>계정으로 로그인</button>}
     </div>
-    {deleteOpen && <DeleteAccountDialog onClose={() => setDeleteOpen(false)} onDelete={onDeleteAccount} />}
   </>;
 }
