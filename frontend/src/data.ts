@@ -75,7 +75,7 @@ export const provinces: Region[] = [
         ? "바다를 따라 걷고, 골목마다 새로운 풍경을 만나 보세요."
         : "오름을 오르고 바람을 따라 걸으며 나만의 섬 풍경을 담아 보세요.",
 }));
-const appProvinceId = (boundaryId: string) => boundaryId === "51" ? "42" : boundaryId;
+const appProvinceId = (boundaryId: string) => (boundaryId === "51" ? "42" : boundaryId);
 export const districts: Region[] = districtData.map(item => {
   const parentId = appProvinceId(item.province);
   const province = provinces.find(region => region.id === parentId)!;
@@ -136,17 +136,35 @@ export function mostRecentTripForRegion(trips: Trip[], regionId: string) {
   }, undefined);
 }
 type LocalTrip = Omit<Trip, "photoUrl" | "thumbnailUrl" | "placePhotoUrls" | "placePhotoThumbnailUrls">;
-type StoredTrip = LocalTrip & {
+export type StoredTrip = LocalTrip & {
   photo: Blob;
   thumbnail?: Blob;
   placePhotos?: (Blob | null)[][];
   placeThumbnails?: (Blob | null)[][];
 };
-type StoredRegionCover = { regionId: string; photo: Blob; thumbnail: Blob };
+export type StoredRegionCover = { regionId: string; photo: Blob; thumbnail: Blob };
+const DEMO_DB = "chaeummdo-demo";
+
+// Demo records as stored, photos as Blobs, for moving them into an account. A browser that never used the
+// demo has no database, and checking for one does not create it.
+export async function readLocalData(): Promise<{ trips: StoredTrip[]; covers: StoredRegionCover[] }> {
+  if (typeof indexedDB.databases === "function" && !(await indexedDB.databases()).some(item => item.name === DEMO_DB))
+    return { trips: [], covers: [] };
+  const db = await openDB();
+  const all = <T>(store: string) =>
+    new Promise<T[]>((resolve, reject) => {
+      const r = db.transaction(store).objectStore(store).getAll();
+      r.onsuccess = () => resolve(r.result);
+      r.onerror = () => reject(r.error);
+    });
+  const [trips, covers] = await Promise.all([all<StoredTrip>("trips"), all<StoredRegionCover>("regionCovers")]);
+  db.close();
+  return { trips, covers };
+}
 // Version 2 adds the 시·도 map photos; devices that already hold trips keep them.
 function openDB(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
-    const request = indexedDB.open("chaeummdo-demo", 2);
+    const request = indexedDB.open(DEMO_DB, 2);
     request.onupgradeneeded = () => {
       const db = request.result;
       if (!db.objectStoreNames.contains("trips")) db.createObjectStore("trips", { keyPath: "id" });
@@ -199,31 +217,44 @@ export async function localTrips(): Promise<Trip[]> {
     .sort((a, b) => b.startDate.localeCompare(a.startDate))
     .map(({ photo, thumbnail, placePhotos, placeThumbnails, ...trip }) => {
       const photoUrl = URL.createObjectURL(photo);
-      const placePhotoUrls = trip.days.map((day, i) => day.map((_, j) => {
-        const placePhoto = placePhotos?.[i]?.[j];
-        return placePhoto ? URL.createObjectURL(placePhoto) : null;
-      }));
+      const placePhotoUrls = trip.days.map((day, i) =>
+        day.map((_, j) => {
+          const placePhoto = placePhotos?.[i]?.[j];
+          return placePhoto ? URL.createObjectURL(placePhoto) : null;
+        }),
+      );
       return {
         ...trip,
         regionIds: regionIdsForTrip(trip),
         photoUrl,
         thumbnailUrl: thumbnail ? URL.createObjectURL(thumbnail) : photoUrl,
         placePhotoUrls,
-        placePhotoThumbnailUrls: placePhotoUrls.map((day, i) => day.map((url, j) => {
-          const placeThumbnail = placeThumbnails?.[i]?.[j];
-          return url && placeThumbnail ? URL.createObjectURL(placeThumbnail) : url;
-        })),
+        placePhotoThumbnailUrls: placePhotoUrls.map((day, i) =>
+          day.map((url, j) => {
+            const placeThumbnail = placeThumbnails?.[i]?.[j];
+            return url && placeThumbnail ? URL.createObjectURL(placeThumbnail) : url;
+          }),
+        ),
       };
     });
 }
-export function saveLocal(trip: LocalTrip, photo: Blob, thumbnail: Blob, placePhotos: (Blob | null)[][], placeThumbnails: (Blob | null)[][]) {
+export function saveLocal(
+  trip: LocalTrip,
+  photo: Blob,
+  thumbnail: Blob,
+  placePhotos: (Blob | null)[][],
+  placeThumbnails: (Blob | null)[][],
+) {
   return writeLocal("trips", objects => objects.put({ ...trip, photo, thumbnail, placePhotos, placeThumbnails } satisfies StoredTrip));
 }
 export function deleteLocal(id: string) {
   return writeLocal("trips", objects => objects.delete(id));
 }
 export class ApiError extends Error {
-  constructor(readonly status: number, message: string) {
+  constructor(
+    readonly status: number,
+    message: string,
+  ) {
     super(message);
   }
 }
@@ -242,10 +273,7 @@ let unauthorizedHandler: (() => void) | null = null;
 export function setUnauthorizedHandler(handler: (() => void) | null) {
   unauthorizedHandler = handler;
 }
-export async function api<T>(
-  path: string,
-  options: RequestInit = {},
-): Promise<T> {
+export async function api<T>(path: string, options: RequestInit = {}): Promise<T> {
   const response = await fetch("/api" + path, {
     ...options,
     headers: { "X-Requested-With": "chaeummdo", ...options.headers },
@@ -253,12 +281,14 @@ export async function api<T>(
   if (!response.ok) {
     let message = fallbackMessages[response.status] ?? "요청을 완료하지 못했어요. 서버 연결과 입력 내용을 확인해 주세요.";
     try {
-      const body = await response.json() as { message?: unknown };
+      const body = (await response.json()) as { message?: unknown };
       if (typeof body.message === "string" && body.message) message = body.message;
-    } catch { /* not JSON: keep the fallback */ }
+    } catch {
+      /* not JSON: keep the fallback */
+    }
     if (response.status === 401 && !path.startsWith("/auth/")) unauthorizedHandler?.();
     throw new ApiError(response.status, message);
   }
   const body = await response.text();
-  return body ? JSON.parse(body) as T : undefined as T;
+  return body ? (JSON.parse(body) as T) : (undefined as T);
 }

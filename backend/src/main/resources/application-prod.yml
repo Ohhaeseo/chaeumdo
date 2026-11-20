@@ -22,3 +22,7 @@ management:
 app:
   media-root: ${MEDIA_ROOT:/app/data/media}
   secure-cookies: true
+  public-url: ${PUBLIC_URL:}
+  mail:
+    # Reset links must never end up in production logs: without MAIL_HOST (or a test outbox) there is no mail.
+    log-only: false

@@ -4,7 +4,7 @@ import { regionById } from "./data";
 import { MAP, navFromLocation, parentOf, pathFor, sameNav, type Nav } from "./navigation.mjs";
 
 export type { Nav };
-export type Overlay = "menu" | "search" | "cover" | "deleteTrip" | "deleteAccount";
+export type Overlay = "menu" | "search" | "cover" | "deleteTrip" | "deleteAccount" | "email" | "import" | "share";
 
 // One browser history entry. depth counts the app's entries behind it: 0 means going back would leave the app.
 type Entry = { app: "chaeummdo"; depth: number; nav: Nav; overlay?: Overlay; auth?: AuthScreen; scrollY?: number };
@@ -16,7 +16,7 @@ const fromUrl = () => navFromLocation(location.pathname, location.search, region
 // Screens, open sheets and the sign-in sub-screens all live in browser history, so the phone's back button,
 // the app's ← and refresh agree. Back closes an open sheet before it leaves a screen.
 export function useNavigation() {
-  const [nav, setNav] = useState<Nav>(() => isEntry(history.state) ? history.state.nav : fromUrl());
+  const [nav, setNav] = useState<Nav>(() => (isEntry(history.state) ? history.state.nav : fromUrl()));
   const [overlay, setOverlay] = useState<Overlay | null>(null);
   const [authScreen, setAuthScreen] = useState<AuthScreen>("login");
   const authRef = useRef<AuthScreen>("login");
@@ -48,6 +48,7 @@ export function useNavigation() {
     };
     addEventListener("popstate", onPop);
     return () => removeEventListener("popstate", onPop);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- registered once; nav is the screen the page opened on
   }, []);
 
   // A new screen starts at the top; one reached by going back returns to where it was left.

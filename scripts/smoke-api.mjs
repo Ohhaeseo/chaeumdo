@@ -16,7 +16,7 @@ const register = async () => {
   const response = await fetch(base + "/auth/register", {
     method: "POST",
     headers: { "X-Requested-With": "chaeummdo", "Content-Type": "application/json" },
-    body: JSON.stringify({ username, displayName: "검증", password }),
+    body: JSON.stringify({ username, displayName: "검증", password, agreedToTerms: true }),
   });
   assert.equal(response.status, 200);
   return response.headers.get("set-cookie").split(";")[0];

@@ -16,7 +16,9 @@ test("면적과 사진 상자는 가장 큰 고리를 기준으로 한다", () =
 test("전국 지도에서는 특별·광역시와 제주만 사진 핀을 함께 쓴다", async () => {
   const { provinces } = JSON.parse(await readFile(boundariesUrl, "utf8"));
   // KoreaMap의 전국 핀 지름(바깥 반지름 33)
-  const pinned = Object.entries(provinces).filter(([, path]) => needsPhotoPin(shapeMetrics(path).area, 66)).map(([id]) => id);
+  const pinned = Object.entries(provinces)
+    .filter(([, path]) => needsPhotoPin(shapeMetrics(path).area, 66))
+    .map(([id]) => id);
   assert.deepEqual(pinned.sort(), ["11", "26", "27", "28", "29", "30", "31", "36", "50"]);
 });
 

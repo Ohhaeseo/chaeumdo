@@ -13,3 +13,17 @@ app:
   media-root: ${MEDIA_ROOT:./.data/media}
   # The traveler cookie is set by TravelerSession; production turns Secure on regardless of the proxy chain.
   secure-cookies: ${SECURE_COOKIES:false}
+  # Links in account mail start with this address.
+  public-url: ${PUBLIC_URL:http://127.0.0.1:5173}
+  # Account mail (Mailer). Without MAIL_HOST, development writes mail to the log; MAIL_OUTBOX writes it to files.
+  mail:
+    host: ${MAIL_HOST:}
+    port: ${MAIL_PORT:587}
+    username: ${MAIL_USERNAME:}
+    password: ${MAIL_PASSWORD:}
+    starttls: ${MAIL_STARTTLS:true}
+    from: ${MAIL_FROM:}
+    outbox: ${MAIL_OUTBOX:}
+    log-only: ${MAIL_LOG_ONLY:true}
+  # Recorded with each sign-up's consent; change it whenever the terms or the privacy policy change.
+  terms-version: ${TERMS_VERSION:draft-2026-11}

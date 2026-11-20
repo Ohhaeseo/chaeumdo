@@ -10,3 +10,10 @@ artifacts/
 .playwright-cli/
 output/
 tmp/
+
+# scripts/backup.sh output (BACKUP_DIR)
+backups/
+
+# Playwright output
+playwright-report/
+test-results/

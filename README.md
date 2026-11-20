@@ -35,6 +35,10 @@
 - **장소 검색과 지도 핀** — Photon 검색과 OpenStreetMap 좌표를 이용해 방문 장소를 지도에 표시합니다.
 - **최근 사진 지도** — 같은 지역에서는 가장 최근 여행의 대표 사진을 지도에 보여줍니다.
 - **시·도 지도 사진** — 전국 지도의 시·도는 원하는 사진을 직접 올려 채울 수 있습니다. 아직 기록이 없는 시·도도 가능합니다.
+- **지도 이미지 공유** — 내가 채운 전국 지도를 그림 한 장으로 저장하거나 휴대폰 공유 창으로 보냅니다.
+- **체험 기록 옮기기** — 체험 모드로 남긴 기록과 사진을 가입한 계정으로 옮깁니다.
+- **이메일로 계정 찾기** — 선택으로 등록한 이메일로 아이디와 비밀번호 재설정 링크를 받습니다.
+- **홈 화면 설치** — 휴대폰 홈 화면에 앱처럼 추가할 수 있습니다.
 - **체험 모드** — 회원가입 없이 브라우저의 IndexedDB에 여행 기록을 저장할 수 있습니다.
 - **계정 모드** — Spring Boot와 PostgreSQL을 이용해 계정과 기록을 서버에 보관합니다.
 
@@ -123,6 +127,8 @@ Vite는 `/api` 요청을 `http://127.0.0.1:8080`으로 프록시합니다. 서�
 
 ```powershell
 cd frontend
+npm run lint          # ESLint (경고도 0개)
+npm run format:check  # Prettier 형식 (고칠 때는 npm run format)
 npm test
 npm run build
 
@@ -130,18 +136,26 @@ cd ../backend
 .\mvnw.cmd test
 ```
 
+화면 테스트(Playwright)는 백엔드를 `127.0.0.1:8080`에 지워도 되는 DB로 띄운 뒤 실행합니다. 테스트가 만든 계정은 끝나면 지웁니다. 처음 한 번 `npx playwright install chromium`이 필요하고, 설치된 Chrome을 쓰려면 `$env:E2E_CHANNEL="chrome"`을 설정합니다.
+
+```powershell
+cd frontend
+npm run e2e
+```
+
 API 통합 및 브라우저 검증 내역은 [검증 기록](docs/VALIDATION.md)에서 확인할 수 있습니다.
 
 ### CI
 
-`main` 푸시와 PR마다 GitHub Actions([`ci.yml`](.github/workflows/ci.yml))가 아래 네 작업을 서로 독립적으로 실행합니다.
+`main` 푸시와 PR마다 GitHub Actions([`ci.yml`](.github/workflows/ci.yml))가 아래 다섯 작업을 서로 독립적으로 실행합니다. 의존성 업데이트는 Dependabot([`dependabot.yml`](.github/dependabot.yml))이 매주 PR로 올립니다.
 
 | 작업 | 하는 일 |
 | --- | --- |
-| `frontend` | Node 22에서 `npm ci`, `npm test`, `npm run build` |
+| `frontend` | Node 22에서 `npm ci`, `npm run lint`, `npm run format:check`, `npm test`, `npm run build` |
+| `e2e` | PostgreSQL 17 서비스 컨테이너와 백엔드를 띄우고, 휴대폰 크기 Chromium으로 `frontend/e2e` 실행(가입 → 기록 저장·수정·삭제 → 뒤로가기 → 탈퇴, 약관 화면) |
 | `backend` | Temurin 21에서 `./mvnw -B test` |
-| `integration` | PostgreSQL 17 서비스 컨테이너에 백엔드 jar를 운영 프로필로 띄우고 `smoke-api.mjs`, `smoke-account.mjs` 실행 |
-| `containers` | 백엔드·프론트 이미지 빌드, `nginx -t`, `caddy validate`, `compose config` 확인 후 운영 compose 전체를 `localhost:8443`에 띄워 `smoke-stack.mjs`(Caddy 뒤 gzip, `index.html` `no-cache`, HTTPS 이동)와 `smoke-api.mjs` 실행 |
+| `integration` | PostgreSQL 17 서비스 컨테이너에 백엔드 jar를 운영 프로필로 띄우고 `smoke-api.mjs`, `smoke-account.mjs`(메일은 `MAIL_OUTBOX` 파일로) 실행 |
+| `containers` | 백엔드·프론트 이미지 빌드, `nginx -t`, `caddy validate`, `compose config` 확인 후 운영 compose 전체를 `localhost:8443`에 띄워 `smoke-stack.mjs`(Caddy 뒤 gzip, `index.html` `no-cache`, 앱 주소, manifest·아이콘, HTTPS 이동), 백업 서비스의 백업 확인, `smoke-api.mjs` 실행 |
 
 같은 전체 스택 검사를 로컬에서 돌리는 명령은 [`.github/ci/compose.stack.yaml`](.github/ci/compose.stack.yaml) 머리말에 있습니다.
 
@@ -154,6 +168,7 @@ API 통합 및 브라우저 검증 내역은 [검증 기록](docs/VALIDATION.md)
 - [디자인 시스템](docs/DESIGN_SYSTEM.md)
 - [데이터베이스·사진 저장 설계](docs/DATABASE.md)
 - [지도 구현 결정](docs/MAP.md)
+- [행정구역 데이터 갱신 절차](docs/REGIONS.md)
 - [검증 기록](docs/VALIDATION.md)
 - [운영 배포 가이드](docs/DEPLOYMENT.md)
 

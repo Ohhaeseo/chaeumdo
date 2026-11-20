@@ -1,18 +1,23 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { readdir, readFile } from "node:fs/promises";
 
 const base = process.env.API_URL || "http://127.0.0.1:8080/api";
+// Optional: the backend's MAIL_OUTBOX, where mail is written as files, to follow an email reset link.
+const outbox = process.env.MAIL_OUTBOX;
 const id = `test_${crypto.randomUUID().replaceAll("-", "").slice(0, 12)}`;
+const email = `${id}@example.com`;
 const password = "Test-password-2026";
 const json = (body) => ({ method: "POST", headers: { "X-Requested-With": "chaeummdo", "Content-Type": "application/json" }, body: JSON.stringify(body) });
-const register = await fetch(base + "/auth/register", json({ username: id, displayName: "검증", password }));
+assert.equal((await fetch(base + "/auth/register", json({ username: id, displayName: "검증", password }))).status, 400, "sign-up requires agreeing to the terms");
+assert.equal((await fetch(base + "/auth/register", json({ username: id, displayName: "검증", password, email: "not-an-address", agreedToTerms: true }))).status, 400);
+const register = await fetch(base + "/auth/register", json({ username: id, displayName: "검증", password, email, agreedToTerms: true }));
 if (register.status !== 200) throw new Error(`Registration failed: ${register.status} ${await register.text()}`);
 const recoveryCode = (await register.json()).recoveryCode;
 const accountCookie = register.headers.get("set-cookie").split(";")[0];
-assert.equal((await fetch(base + "/auth/register", json({ username: id.toUpperCase(), displayName: "중복", password }))).status, 409);
+assert.equal((await fetch(base + "/auth/register", json({ username: id.toUpperCase(), displayName: "중복", password, agreedToTerms: true }))).status, 409);
 const me = await fetch(base + "/auth/me", { headers: { Cookie: accountCookie } });
 assert.equal(me.status, 200);
-assert.equal((await me.json()).username, id);
+assert.deepEqual(await me.json(), { username: id, displayName: "검증", email });
 const wrong = await fetch(base + "/auth/login", json({ username: id, password: "incorrect" }));
 assert.equal(wrong.status, 401);
 const status = async (cookie) => (await fetch(base + "/auth/me", { headers: { Cookie: cookie } })).status;
@@ -65,8 +70,50 @@ assert.equal(await status(phoneCookie), 200);
 for (let attempt = 1; attempt <= 4; attempt++) assert.equal((await fetch(base + "/auth/login", json({ username: id, password: "incorrect" }))).status, 401);
 assert.equal((await fetch(base + "/auth/login", json({ username: id, password: "incorrect" }))).status, 401, "fifth failure locks the account");
 assert.equal((await fetch(base + "/auth/login", json({ username: id, password: "Updated-password-2026" }))).status, 429, "locked account rejects even the right password");
-const del = await fetch(base + "/auth/delete", { ...json({ password: "Updated-password-2026" }), headers: { ...json({}).headers, Cookie: nextCookie } });
-assert.equal(del.status, 200);
-for (const cookie of [nextCookie, phoneCookie]) assert.equal(await status(cookie), 401, "account deletion signs out every device");
+// Email: changing it needs the password; recovery answers the same for unknown addresses.
+const putEmail = (body, cookie) => fetch(base + "/auth/email", { method: "PUT", headers: { ...json({}).headers, Cookie: cookie }, body: JSON.stringify(body) });
+const newEmail = `${id}.new@example.com`;
+assert.equal((await putEmail({ email: newEmail, password: "incorrect" }, nextCookie)).status, 401);
+assert.equal((await putEmail({ email: newEmail, password: "Updated-password-2026" }, { Cookie: "" }.Cookie)).status, 401, "changing the email needs a session");
+const changed = await putEmail({ email: newEmail, password: "Updated-password-2026" }, nextCookie);
+assert.equal(changed.status, 200);
+assert.equal((await changed.json()).email, newEmail);
+const recover = (address) => fetch(base + "/auth/email-recovery", json({ email: address }));
+const known = await recover(newEmail.toUpperCase());
+assert.equal(known.status, 200);
+const unknown = await recover(`nobody_${crypto.randomUUID()}@example.com`);
+assert.deepEqual(await unknown.json(), await known.json(), "an unknown address gets the same answer");
+let emailReset = "skipped (no MAIL_OUTBOX)";
+if (outbox) {
+  const mails = async () => {
+    const files = (await readdir(outbox)).sort();
+    const bodies = await Promise.all(files.map((name) => readFile(`${outbox}/${name}`, "utf8")));
+    return bodies.filter((body) => body.includes(`To: ${newEmail.toUpperCase()}`) || body.includes(`To: ${newEmail}`));
+  };
+  const sent = await mails();
+  assert.equal(sent.length, 1, "one recovery mail");
+  assert.match(sent[0], new RegExp(`아이디: ${id}`));
+  const token = sent[0].match(/reset-password#token=([0-9a-f]{64})/)[1];
+  assert.equal((await recover(newEmail)).status, 200);
+  assert.equal((await mails()).length, 1, "a second request within the cooldown sends no mail");
+  const resetByMail = await fetch(base + "/auth/email-reset", json({ token, newPassword: "Mailed-password-2026" }));
+  assert.equal(resetByMail.status, 200);
+  const resetBody = await resetByMail.json();
+  assert.equal(resetBody.username, id);
+  assert.notEqual(resetBody.recoveryCode, nextCode);
+  const mailCookie = resetByMail.headers.get("set-cookie").split(";")[0];
+  for (const cookie of [nextCookie, phoneCookie]) assert.equal(await status(cookie), 401, "an email reset signs out every existing session");
+  assert.equal(await status(mailCookie), 200);
+  assert.equal((await fetch(base + "/auth/email-reset", json({ token, newPassword: "Another-password-2026" }))).status, 400, "a reset link works once");
+  assert.equal((await fetch(base + "/auth/login", json({ username: id, password: "Mailed-password-2026" }))).status, 200, "the reset also lifts the lock");
+  const del = await fetch(base + "/auth/delete", { ...json({ password: "Mailed-password-2026" }), headers: { ...json({}).headers, Cookie: mailCookie } });
+  assert.equal(del.status, 200);
+  assert.equal(await status(mailCookie), 401, "account deletion signs out every device");
+  emailReset = "reset link from mail, single use, sessions revoked, lock lifted, cooldown";
+} else {
+  const del = await fetch(base + "/auth/delete", { ...json({ password: "Updated-password-2026" }), headers: { ...json({}).headers, Cookie: nextCookie } });
+  assert.equal(del.status, 200);
+  for (const cookie of [nextCookie, phoneCookie]) assert.equal(await status(cookie), 401, "account deletion signs out every device");
+}
 assert.equal((await fetch(base + "/photos/" + photoId, { headers: { Cookie: phoneCookie } })).status, 401, "a deleted account's session cannot read photos");
-console.log("PASS: register without prior session, duplicate ID, account session, companion/cover/place photo persistence, wrong password, concurrent sessions on several devices, logout of one device only, same-browser login replacement, ID recovery, password reset signing out every session, lock after five failures, account deletion signing out every device");
+console.log(`PASS: terms consent required, register with email, duplicate ID, account session, companion/cover/place photo persistence, wrong password, concurrent sessions on several devices, logout of one device only, same-browser login replacement, ID recovery, password reset signing out every session, lock after five failures, email change needs password, email recovery answers alike, email reset: ${emailReset}, account deletion signing out every device`);

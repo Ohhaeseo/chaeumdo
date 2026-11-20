@@ -33,9 +33,10 @@ export function useTravelData(mode: Mode) {
     setLoading(true);
     setError("");
     try {
-      const [nextTrips, nextCovers] = mode === "demo"
-        ? await Promise.all([localTrips(), localRegionCovers()])
-        : await Promise.all([api<Trip[]>("/trips"), api<RegionCover[]>("/region-covers")]);
+      const [nextTrips, nextCovers] =
+        mode === "demo"
+          ? await Promise.all([localTrips(), localRegionCovers()])
+          : await Promise.all([api<Trip[]>("/trips"), api<RegionCover[]>("/region-covers")]);
       replace(nextTrips, nextCovers);
     } catch (failure) {
       // A 401 has already sent the app back to the login screen.
