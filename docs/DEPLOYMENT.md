@@ -91,7 +91,7 @@ docker compose --env-file .env.production -f compose.production.yaml exec backen
 
 ## 백업과 복구
 
-`backup` 서비스(`scripts/backup.sh`)가 시작할 때 한 번, 그 뒤 24시간마다 백업합니다. 백업 한 번은 호스트의 `BACKUP_DIR`(기본 `./backups`) 아래 UTC 시각 이름의 폴더 하나입니다.
+`backup` 서비스(`scripts/backup.sh`)는 백엔드가 정상 기동한 뒤 시작하며, 시작할 때 한 번, 그 뒤 24시간마다 백업합니다. 백엔드보다 먼저 사진 볼륨을 마운트하면 Docker가 볼륨을 root 소유로 만들어 백엔드가 사진을 저장하지 못하기 때문입니다. 백엔드는 사진 폴더에 쓸 수 없으면 시작하지 않고 로그에 이유를 남깁니다. 백업 한 번은 호스트의 `BACKUP_DIR`(기본 `./backups`) 아래 UTC 시각 이름의 폴더 하나입니다.
 
 | 파일 | 내용 |
 |---|---|

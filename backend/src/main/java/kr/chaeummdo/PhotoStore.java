@@ -43,6 +43,9 @@ public class PhotoStore {
     this.root = Path.of(root).toAbsolutePath().normalize();
     this.decoders = new Semaphore(Math.max(1, decodeConcurrency), true);
     Files.createDirectories(this.root);
+    // Fail at start, with the reason in the log, rather than on the first upload.
+    if (!Files.isWritable(this.root))
+      throw new IllegalStateException("The media folder " + this.root + " is not writable by this process; check the owner of the volume.");
   }
 
   Path root() {
