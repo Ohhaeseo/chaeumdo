@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
 import { MapPin, Trash2, UserRound } from "lucide-react";
 import { api, deleteLocal, mostRecentTripForRegion, provinceIdForRegion, regionById, setUnauthorizedHandler, type Region, type Trip } from "./data";
-import AuthView, { type Account, type AuthScreen } from "./AuthView";
-import { RegionSearchSheet, TripDeleteDialog } from "./dialogs";
+import AuthView, { type Account } from "./AuthView";
+import { DeleteAccountDialog, RegionSearchSheet, TripDeleteDialog } from "./dialogs";
+import { parentOf, type Nav } from "./navigation.mjs";
 import ProvinceCoverSheet from "./ProvinceCoverSheet";
 import MapScreen from "./screens/MapScreen";
 import MyScreen from "./screens/MyScreen";
@@ -12,42 +13,32 @@ import TripDetailScreen from "./screens/TripDetailScreen";
 import TravelForm from "./TravelForm";
 import { travelStats } from "./travelStats";
 import { Attribution, SplashView } from "./ui";
+import { MAP, useNavigation } from "./useNavigation";
 import { useTravelData, type Mode } from "./useTravelData";
 import "./styles.css";
-
-type Screen = "map" | "districts" | "my" | "region" | "detail" | "form" | "complete";
 
 export default function MobileApp() {
   const [mode, setMode] = useState<Mode>(() => localStorage.getItem("chaeummdo-mode") === "demo" ? "demo" : "server");
   const { trips, covers, loading, setLoading, error, reload, clear } = useTravelData(mode);
+  const navigation = useNavigation();
+  const { nav, overlay, push, replace, back } = navigation;
   const [account, setAccount] = useState<Account | null>(null);
-  const [authScreen, setAuthScreen] = useState<AuthScreen>("login");
   const [recoveryCode, setRecoveryCode] = useState("");
   const [booting, setBooting] = useState(true);
-  // Navigation: the screen plus the 시·도, region and trip it shows.
-  const [screen, setScreen] = useState<Screen>("map");
-  const [province, setProvince] = useState<Region | null>(null);
-  const [region, setRegion] = useState<Region | null>(null);
-  const [trip, setTrip] = useState<Trip | null>(null);
-  const [editing, setEditing] = useState(false);
-  // Overlays.
-  const [menuOpen, setMenuOpen] = useState(false);
-  const [searchOpen, setSearchOpen] = useState(false);
   const [query, setQuery] = useState("");
-  const [coverOpen, setCoverOpen] = useState(false);
-  const [tripDeleteOpen, setTripDeleteOpen] = useState(false);
 
+  // The screen's 시·도, region and trip come from the URL, so they are looked up rather than kept as objects.
+  const province = nav.provinceId ? regionById.get(nav.provinceId) ?? null : null;
+  const region = nav.regionId ? regionById.get(nav.regionId) ?? null : null;
+  const trip = nav.tripId ? trips.find(item => item.id === nav.tripId) ?? null : null;
   const stats = useMemo(() => travelStats(trips), [trips]);
   const coverByRegion = useMemo(() => new Map(covers.map(cover => [cover.regionId, cover])), [covers]);
-
-  useEffect(() => { window.scrollTo({ top: 0, behavior: "auto" }); }, [screen, region?.id, trip?.id]);
+  const ready = !booting && !loading && (mode === "demo" || account !== null);
 
   function signedOut() {
     setAccount(null);
     clear();
-    setAuthScreen("login");
-    setScreen("map");
-    setMenuOpen(false);
+    replace(MAP);
   }
   useEffect(() => {
     if (mode !== "server") return;
@@ -66,51 +57,32 @@ export default function MobileApp() {
       void reload().finally(() => setBooting(false));
     }
   }, [mode]);
+  // A link or a back step can name a trip that is gone (deleted, or another account's): show the screen above it.
+  useEffect(() => {
+    if (ready && nav.tripId && !trip && (nav.screen === "detail" || nav.screen === "form")) replace(parentOf(nav, regionById));
+  }, [ready, nav, trip]);
 
   function openProvince(next: Region) {
-    setProvince(next);
-    setRegion(null);
-    setTrip(null);
-    setSearchOpen(false);
-    setScreen("districts");
+    push({ screen: "districts", provinceId: next.id });
   }
   function openRegion(next: Region) {
-    setProvince(regionById.get(provinceIdForRegion(next.id)) || null);
-    setRegion(next);
-    setTrip(null);
-    setSearchOpen(false);
-    setScreen("region");
+    push({ screen: "region", provinceId: provinceIdForRegion(next.id), regionId: next.id });
   }
   function openTrip(next: Trip) {
-    setTrip(next);
-    setScreen("detail");
-  }
-  function goMap() {
-    setProvince(null);
-    setRegion(null);
-    setTrip(null);
-    setScreen("map");
-    setMenuOpen(false);
+    push({ screen: "detail", provinceId: nav.provinceId, regionId: nav.regionId, tripId: next.id });
   }
   function openForm(edit = false) {
-    // Adding from a 시·도 map starts the form in that 시·도.
-    if (!edit && screen === "districts" && province) setRegion(province);
-    setEditing(edit);
-    setScreen("form");
-    setMenuOpen(false);
+    if (edit) push({ ...nav, screen: "form", editing: true });
+    // Adding from a 시·도 map starts the form in that 시·도; from the map or MY it starts empty.
+    else push({ screen: "form", provinceId: nav.provinceId, regionId: nav.screen === "districts" ? nav.provinceId : nav.screen === "map" || nav.screen === "my" ? undefined : nav.regionId });
   }
-  function back() {
-    if (screen === "detail") setScreen("region");
-    else if (screen === "region" && region?.level === "neighborhood") {
-      setRegion(regionById.get(region.parentId || "") || null);
-      setScreen("region");
-    } else if (screen === "region" && province) setScreen("districts");
-    else if (screen === "districts") goMap();
-    else if (screen === "form" && editing) setScreen("detail");
-    else if (screen === "form") setScreen(region && region.level !== "province" ? "region" : province ? "districts" : "map");
-    else goMap();
+  function openTab(next: "map" | "my") {
+    if (nav.screen === next) return navigation.closeOverlay();
+    // MY opens over the map, so the map tab goes back to it rather than stacking another map.
+    if (next === "my") push({ screen: "my" });
+    else back();
   }
-  const toggleMenu = () => setMenuOpen(open => !open);
+  const toggleMenu = () => overlay === "menu" ? navigation.closeOverlay() : navigation.openOverlay("menu");
 
   async function logout() {
     await api("/auth/logout", { method: "POST" });
@@ -124,60 +96,66 @@ export default function MobileApp() {
     if (!trip) return;
     if (mode === "demo") await deleteLocal(trip.id);
     else await api(`/trips/${trip.id}`, { method: "DELETE" });
-    setTripDeleteOpen(false);
-    setTrip(null);
+    // Close the dialog and leave the detail screen together, so back does not return to the deleted trip.
+    await navigation.leave(2, parentOf(nav, regionById));
     await reload();
-    setScreen("region");
+  }
+  function switchMode() {
+    navigation.closeOverlay();
+    setMode(mode === "demo" ? "server" : "demo");
   }
 
   if (booting) return <SplashView />;
   if (mode === "server" && !account) return <div className="page-canvas"><div className="phone auth-phone">
-    <AuthView screen={authScreen} setScreen={setAuthScreen} loading={loading} onDemo={() => setMode("demo")}
-      onAuthenticated={async next => { setAccount(next); setAuthScreen("login"); setScreen("map"); await reload(); }}
+    <AuthView screen={navigation.authScreen} setScreen={navigation.showAuth} loading={loading} onDemo={() => setMode("demo")}
+      onAuthenticated={async next => { setAccount(next); navigation.finishAuth(); await reload(); }}
       recoveryCode={recoveryCode} setRecoveryCode={setRecoveryCode} />
     <Attribution />
   </div></div>;
 
+  const screen = nav.screen;
+  const doneNav: Nav = province ? { screen: "districts", provinceId: province.id } : MAP;
   return <div className="page-canvas"><div className="phone">
     <div className="app-content">
       {screen === "map" && <MapScreen trips={trips} covers={coverByRegion} error={error} onRetry={() => void reload()}
-        onSearch={() => setSearchOpen(true)} onMenu={toggleMenu} onProvince={openProvince} onAdd={() => openForm()} />}
+        onSearch={() => navigation.openOverlay("search")} onMenu={toggleMenu} onProvince={openProvince} onAdd={() => openForm()} />}
       {screen === "districts" && province && <ProvinceScreen province={province} trips={trips} covers={coverByRegion} stats={stats}
-        onBack={back} onMenu={toggleMenu} onRegion={openRegion} onCover={() => setCoverOpen(true)} onAdd={() => openForm()} />}
+        onBack={back} onMenu={toggleMenu} onRegion={openRegion} onCover={() => navigation.openOverlay("cover")} onAdd={() => openForm()} />}
       {screen === "region" && region && <RegionScreen region={region} trips={trips} stats={stats}
         onBack={back} onMenu={toggleMenu} onAdd={() => openForm()} onRegion={openRegion} onTrip={openTrip} />}
       {screen === "detail" && region && trip && <TripDetailScreen trip={trip} region={region}
         onBack={back} onMenu={toggleMenu} onEdit={() => openForm(true)} />}
-      {screen === "form" && <TravelForm region={region} trip={editing ? trip : null} mode={mode} onBack={back} onSaved={async saved => {
-        setProvince(regionById.get(provinceIdForRegion(saved.id)) || null);
-        setRegion(saved);
-        setTrip(null);
+      {/* An edit form waits for its trip: the form reads it only once, when it opens. */}
+      {screen === "form" && (!nav.editing || trip) && <TravelForm region={region} trip={nav.editing ? trip : null} mode={mode} onBack={back} onSaved={async saved => {
         await reload();
-        setScreen("complete");
+        // The completion screen takes the form's place, so back from it returns to where the form was opened.
+        replace({ screen: "complete", provinceId: provinceIdForRegion(saved.id), regionId: saved.id });
       }} />}
       {screen === "complete" && <div className="complete-view">
         <div className="complete-mark"><MapPin size={54} strokeWidth={1} /></div>
         <h1>{region?.fullName} 여행 기록 완료 !</h1>
-        <button className="solid-button" onClick={() => province ? setScreen("districts") : goMap()}>지도에서 보기</button>
+        <button className="solid-button" onClick={() => replace(doneNav)}>지도에서 보기</button>
       </div>}
       {screen === "my" && <MyScreen displayName={account?.displayName} tripCount={trips.length} stats={stats} mode={mode}
-        onMenu={toggleMenu} onProvince={openProvince} onLogout={() => void logout()} onAccountMode={() => setMode("server")} onDeleteAccount={deleteAccount} />}
-      {menuOpen && <div className="more-menu">
+        onMenu={toggleMenu} onProvince={openProvince} onLogout={() => void logout()} onAccountMode={() => setMode("server")}
+        onDeleteAccount={() => navigation.openOverlay("deleteAccount")} />}
+      {overlay === "menu" && <div className="more-menu">
         <button onClick={() => openForm(screen === "detail")}>{screen === "detail" ? "기록 수정" : "여행기록 추가"}</button>
-        {screen === "detail" && trip && <button className="danger" onClick={() => { setTripDeleteOpen(true); setMenuOpen(false); }}><Trash2 size={14} /> 기록 삭제</button>}
-        <button onClick={() => { setSearchOpen(true); setMenuOpen(false); }}>지역 목록 보기</button>
-        <button onClick={() => { setMode(mode === "demo" ? "server" : "demo"); setMenuOpen(false); }}>{mode === "demo" ? "계정으로 로그인" : "기기 체험 모드"}</button>
+        {screen === "detail" && trip && <button className="danger" onClick={() => navigation.openOverlay("deleteTrip")}><Trash2 size={14} /> 기록 삭제</button>}
+        <button onClick={() => navigation.openOverlay("search")}>지역 목록 보기</button>
+        <button onClick={switchMode}>{mode === "demo" ? "계정으로 로그인" : "기기 체험 모드"}</button>
       </div>}
     </div>
     {(screen === "map" || screen === "my") && <nav className="mobile-tabs" aria-label="주요 메뉴">
-      <button className={screen === "map" ? "current" : ""} onClick={goMap}><MapPin size={19} fill="currentColor" /><span>지도</span></button>
-      <button className={screen === "my" ? "current" : ""} onClick={() => { setMenuOpen(false); setScreen("my"); }}><UserRound size={19} fill="currentColor" /><span>나</span></button>
+      <button className={screen === "map" ? "current" : ""} onClick={() => openTab("map")}><MapPin size={19} fill="currentColor" /><span>지도</span></button>
+      <button className={screen === "my" ? "current" : ""} onClick={() => openTab("my")}><UserRound size={19} fill="currentColor" /><span>나</span></button>
     </nav>}
-    {searchOpen && <RegionSearchSheet query={query} onQuery={setQuery} stats={stats} onClose={() => setSearchOpen(false)}
+    {overlay === "search" && <RegionSearchSheet query={query} onQuery={setQuery} stats={stats} onClose={navigation.closeOverlay}
       onPick={picked => picked.level === "province" ? openProvince(picked) : openRegion(picked)} />}
-    {coverOpen && province && <ProvinceCoverSheet province={province} cover={coverByRegion.get(province.id)} latestTrip={mostRecentTripForRegion(trips, province.id)}
-      mode={mode} onClose={() => setCoverOpen(false)} onChanged={reload} />}
-    {tripDeleteOpen && trip && region && <TripDeleteDialog trip={trip} region={region} onClose={() => setTripDeleteOpen(false)} onDelete={deleteTrip} />}
+    {overlay === "cover" && province && <ProvinceCoverSheet province={province} cover={coverByRegion.get(province.id)} latestTrip={mostRecentTripForRegion(trips, province.id)}
+      mode={mode} onClose={navigation.closeOverlay} onChanged={reload} />}
+    {overlay === "deleteTrip" && trip && region && <TripDeleteDialog trip={trip} region={region} onClose={navigation.closeOverlay} onDelete={deleteTrip} />}
+    {overlay === "deleteAccount" && <DeleteAccountDialog onClose={navigation.closeOverlay} onDelete={deleteAccount} />}
     <Attribution />
   </div></div>;
 }
