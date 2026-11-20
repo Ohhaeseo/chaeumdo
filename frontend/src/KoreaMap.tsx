@@ -1,9 +1,9 @@
 import { Fragment, type KeyboardEvent } from "react";
 import { districts, mostRecentTripForRegion, provinces, regionById, regionContains, regionIdsForTrip, type Region, type RegionCover, type Trip } from "./data";
-import { useJejuBoundaries, useMapBoundaries, type JejuBoundaries } from "./mapData";
+import { useJejuBoundaries, useMapBoundaries, type JejuBoundaries, type MapBoundaries } from "./mapData";
 import { needsPhotoPin, shapeMetrics } from "./mapShape.mjs";
 
-const points: Record<string, [number, number]> = {
+export const points: Record<string, [number, number]> = {
   "11": [202, 145], "26": [408, 455], "27": [360, 354], "28": [138, 168],
   "29": [180, 442], "30": [236, 300], "31": [431, 395], "36": [225, 265],
   "41": [220, 190], "42": [320, 125], "43": [280, 238], "44": [175, 285],
@@ -11,8 +11,10 @@ const points: Record<string, [number, number]> = {
 };
 // National photo pin: white ring radius and photo radius. The name sits inside the photo,
 // so a pin covers no more than its circle and leaves neighbouring labels readable.
-const PIN_RADIUS = 33;
-const PIN_PHOTO_RADIUS = 30;
+export const PIN_RADIUS = 33;
+export const PIN_PHOTO_RADIUS = 30;
+export const NATIONAL_VIEWBOX = { x: 5, y: 0, width: 540, height: 710 };
+export const labelWidth = (name: string) => name.length * 12 + 16;
 
 const appProvinceId = (boundaryId: string) => boundaryId === "51" ? "42" : boundaryId;
 
@@ -41,19 +43,26 @@ export function provincePhoto(region: Region, trips: Trip[], covers: Map<string,
   return covers.get(region.id)?.thumbnailUrl ?? mostRecentTripForRegion(trips, region.id)?.thumbnailUrl;
 }
 
-export default function KoreaMap({ trips, covers, onProvince }: { trips: Trip[]; covers: Map<string, RegionCover>; onProvince: (region: Region) => void }) {
-  const { boundaries, error, retry } = useMapBoundaries();
-  if (!boundaries) return <MapLoadState error={error} retry={retry} />;
+// Everything the national map draws for each 시·도, shared by the map on screen and the saved map image.
+export function provinceMapItems(boundaries: MapBoundaries, trips: Trip[], covers: Map<string, RegionCover>) {
   const byId = new Map(provinces.map(region => [region.id, region]));
-  const items = Object.entries(boundaries.provinces).flatMap(([id, path]) => {
+  return Object.entries(boundaries.provinces).flatMap(([id, path]) => {
     const region = byId.get(appProvinceId(id));
     if (!region) return [];
     const shape = metrics(path);
+    const latest = mostRecentTripForRegion(trips, region.id);
     // Visiting is decided by trips alone; a picked photo may fill a 시·도 that has none yet.
-    const visited = Boolean(mostRecentTripForRegion(trips, region.id));
+    const visited = Boolean(latest);
     const photo = provincePhoto(region, trips, covers);
-    return [{ region, path, shape, visited, photo, pinned: Boolean(photo) && needsPhotoPin(shape.area, PIN_RADIUS * 2) }];
+    const fullPhoto = covers.get(region.id)?.photoUrl ?? latest?.photoUrl;
+    return [{ region, path, shape, visited, photo, fullPhoto, point: points[region.id], pinned: Boolean(photo) && needsPhotoPin(shape.area, PIN_RADIUS * 2) }];
   });
+}
+
+export default function KoreaMap({ trips, covers, onProvince }: { trips: Trip[]; covers: Map<string, RegionCover>; onProvince: (region: Region) => void }) {
+  const { boundaries, error, retry } = useMapBoundaries();
+  if (!boundaries) return <MapLoadState error={error} retry={retry} />;
+  const items = provinceMapItems(boundaries, trips, covers);
   return <svg className="korea-svg" viewBox="5 0 540 710" role="img" aria-label="대한민국 시·도 여행 지도">
     <defs>{items.map(({ region, path, photo, pinned }) => photo && <Fragment key={region.id}>
       <clipPath id={`province-photo-${region.id}`}><path d={path} clipRule="evenodd" /></clipPath>
@@ -72,18 +81,18 @@ export default function KoreaMap({ trips, covers, onProvince }: { trips: Trip[];
       const [x, y] = points[region.id];
       if (!photo) return <text key={region.id} x={x} y={y} textAnchor="middle" className="map-label" pointerEvents="none">{region.name}</text>;
       if (pinned) return null;
-      const labelWidth = region.name.length * 12 + 16;
-      return <g key={region.id} className="map-photo-label" pointerEvents="none"><rect x={x - labelWidth / 2} y={y - 10} width={labelWidth} height="20" rx="10" /><text x={x} y={y + 4} textAnchor="middle">{region.name}</text></g>;
+      const width = labelWidth(region.name);
+      return <g key={region.id} className="map-photo-label" pointerEvents="none"><rect x={x - width / 2} y={y - 10} width={width} height="20" rx="10" /><text x={x} y={y + 4} textAnchor="middle">{region.name}</text></g>;
     })}
     {/* Pins go last so a neighbour's label never covers a photo. The province shape stays the one tab stop. */}
     {items.map(({ region, photo, pinned }) => {
       if (!photo || !pinned) return null;
       const [x, y] = points[region.id];
-      const labelWidth = region.name.length * 12 + 16;
+      const width = labelWidth(region.name);
       return <g key={region.id} className="photo-marker" aria-hidden="true" onClick={() => onProvince(region)}>
         <circle cx={x} cy={y} r={PIN_RADIUS} fill="#FFFFFF" />
         <image href={photo} x={x - PIN_PHOTO_RADIUS} y={y - PIN_PHOTO_RADIUS} width={PIN_PHOTO_RADIUS * 2} height={PIN_PHOTO_RADIUS * 2} preserveAspectRatio="xMidYMid slice" clipPath={`url(#pin-${region.id})`} />
-        <g className="map-photo-label"><rect x={x - labelWidth / 2} y={y + 6} width={labelWidth} height="18" rx="9" /><text x={x} y={y + 19} textAnchor="middle">{region.name}</text></g>
+        <g className="map-photo-label"><rect x={x - width / 2} y={y + 6} width={width} height="18" rx="9" /><text x={x} y={y + 19} textAnchor="middle">{region.name}</text></g>
       </g>;
     })}
   </svg>;

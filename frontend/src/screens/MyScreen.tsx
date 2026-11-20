@@ -1,14 +1,16 @@
-import { ChevronRight, Mail, MoreHorizontal, UserRound } from "lucide-react";
+import { ChevronRight, Mail, MoreHorizontal, Upload, UserRound } from "lucide-react";
 import { LegalLinks, type LegalDocName } from "../AuthView";
 import { districts, regionById, type Region } from "../data";
 import type { TravelStats } from "../travelStats";
 import type { Mode } from "../useTravelData";
 
-export default function MyScreen({ displayName, email, tripCount, stats, mode, onMenu, onProvince, onLogout, onAccountMode, onDeleteAccount, onEmail, onLegal }: {
+export default function MyScreen({ displayName, email, tripCount, stats, mode, onMenu, onProvince, onLogout, onAccountMode, onDeleteAccount, onEmail, onLegal, localCount, onImport }: {
   displayName?: string;
   email?: string | null;
   onEmail: () => void;
   onLegal: (doc: LegalDocName) => void;
+  localCount: number;
+  onImport: () => void;
   tripCount: number;
   stats: TravelStats;
   mode: Mode;
@@ -48,6 +50,11 @@ export default function MyScreen({ displayName, email, tripCount, stats, mode, o
         </button>)}
       </div>
     </section>
+    {mode === "server" && localCount > 0 && <button className="legacy-region-card email-card" onClick={onImport}>
+      <Upload size={16} strokeWidth={1.4} />
+      <span className="cover-card-text"><b>체험 기록 옮기기</b><small>이 기기의 체험 모드에 {localCount}개가 남아 있어요</small></span>
+      <ChevronRight size={18} />
+    </button>}
     {mode === "server" && <button className="legacy-region-card email-card" onClick={onEmail}>
       <Mail size={16} strokeWidth={1.4} />
       <span className="cover-card-text"><b>복구용 이메일</b><small>{email || "등록하면 비밀번호를 잊어도 메일로 찾을 수 있어요"}</small></span>

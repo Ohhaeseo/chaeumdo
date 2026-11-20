@@ -31,6 +31,42 @@ export function DeleteAccountDialog({ onClose, onDelete }: { onClose: () => void
   </div>;
 }
 
+// Offered after signing in on a device that still holds demo records.
+export function ImportDemoSheet({ counts, onImport, onLater }: {
+  counts: { trips: number; covers: number };
+  onImport: (onProgress: (done: number, total: number) => void) => Promise<void>;
+  onLater: () => void;
+}) {
+  const [progress, setProgress] = useState<[number, number] | null>(null);
+  const [error, setError] = useState("");
+  const busy = progress !== null && !error;
+  const start = async () => {
+    setError("");
+    try {
+      await onImport((done, total) => setProgress([done, total]));
+    } catch (failure) {
+      setError(`${failure instanceof Error ? failure.message : "옮기지 못했어요."} 옮긴 기록은 계정에 남았고, 남은 기록은 다시 시도하면 이어서 옮겨요.`);
+    }
+  };
+  const parts = [counts.trips && `여행 기록 ${counts.trips}개`, counts.covers && `지도 사진 ${counts.covers}장`].filter(Boolean).join(" · ");
+  return <div className="sheet-backdrop" onClick={() => !busy && onLater()}>
+    <div className="delete-dialog import-dialog" role="dialog" aria-labelledby="import-title" onClick={event => event.stopPropagation()}>
+      <h2 id="import-title">체험 기록을 옮길까요?</h2>
+      <p className="import-counts">이 기기의 체험 모드 · {parts}</p>
+      <p>계정으로 옮기면 다른 기기에서도 볼 수 있어요. 옮긴 기록은 이 기기의 체험 모드에서 지워져요.</p>
+      {progress && <div className="import-progress" role="status">
+        <div className="progress-track"><i style={{ width: `${progress[1] ? Math.round(progress[0] / progress[1] * 100) : 0}%` }} /></div>
+        <small>{progress[0]} / {progress[1]}</small>
+      </div>}
+      {error && <p className="form-error" role="alert">{error}</p>}
+      <div>
+        <button type="button" disabled={busy} onClick={onLater}>나중에</button>
+        <button className="solid-button" disabled={busy} onClick={() => void start()}>{busy ? "옮기는 중..." : error ? "다시 시도" : "계정으로 옮기기"}</button>
+      </div>
+    </div>
+  </div>;
+}
+
 // Changing or removing the recovery email needs the password, like the server checks.
 export function EmailDialog({ current, onClose, onSave }: { current?: string | null; onClose: () => void; onSave: (email: string | null, password: string) => Promise<void> }) {
   const [email, setEmail] = useState(current || "");

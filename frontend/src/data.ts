@@ -136,17 +136,33 @@ export function mostRecentTripForRegion(trips: Trip[], regionId: string) {
   }, undefined);
 }
 type LocalTrip = Omit<Trip, "photoUrl" | "thumbnailUrl" | "placePhotoUrls" | "placePhotoThumbnailUrls">;
-type StoredTrip = LocalTrip & {
+export type StoredTrip = LocalTrip & {
   photo: Blob;
   thumbnail?: Blob;
   placePhotos?: (Blob | null)[][];
   placeThumbnails?: (Blob | null)[][];
 };
-type StoredRegionCover = { regionId: string; photo: Blob; thumbnail: Blob };
+export type StoredRegionCover = { regionId: string; photo: Blob; thumbnail: Blob };
+const DEMO_DB = "chaeummdo-demo";
+
+// Demo records as stored, photos as Blobs, for moving them into an account. A browser that never used the
+// demo has no database, and checking for one does not create it.
+export async function readLocalData(): Promise<{ trips: StoredTrip[]; covers: StoredRegionCover[] }> {
+  if (typeof indexedDB.databases === "function" && !(await indexedDB.databases()).some(item => item.name === DEMO_DB)) return { trips: [], covers: [] };
+  const db = await openDB();
+  const all = <T,>(store: string) => new Promise<T[]>((resolve, reject) => {
+    const r = db.transaction(store).objectStore(store).getAll();
+    r.onsuccess = () => resolve(r.result);
+    r.onerror = () => reject(r.error);
+  });
+  const [trips, covers] = await Promise.all([all<StoredTrip>("trips"), all<StoredRegionCover>("regionCovers")]);
+  db.close();
+  return { trips, covers };
+}
 // Version 2 adds the 시·도 map photos; devices that already hold trips keep them.
 function openDB(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
-    const request = indexedDB.open("chaeummdo-demo", 2);
+    const request = indexedDB.open(DEMO_DB, 2);
     request.onupgradeneeded = () => {
       const db = request.result;
       if (!db.objectStoreNames.contains("trips")) db.createObjectStore("trips", { keyPath: "id" });

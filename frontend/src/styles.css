@@ -24,3 +24,6 @@
 .auth-email-link{display:block;margin:16px auto 0;font-size:11px;color:#696973}
 .email-card{width:calc(100% - 72px);margin:0 36px 12px;justify-content:flex-start;gap:10px;color:#111111}.email-card svg:first-child{flex:none;color:#696973}
 .email-dialog input{margin:10px 0 0}.email-dialog input+input{margin-bottom:12px}.email-dialog .email-remove{display:block;margin:14px auto 0;font-size:11px;color:#9A2F2F}
+.share-sheet{display:flex;flex-direction:column;gap:12px}.share-preview{display:grid;place-items:center;min-height:240px;border-radius:14px;background:#FFFFFF;overflow:hidden}.share-preview img{width:100%;height:auto;max-height:58vh;object-fit:contain}.share-preview p{font-size:12px;color:#696973;padding:20px;text-align:center}.share-actions{display:flex;flex-direction:column;gap:8px}.share-notice{text-align:center;font-size:11px;color:#696973}
+.import-dialog .import-counts{margin-top:10px;padding:10px;border-radius:9px;background:#F7F7F5;color:#111111;text-align:center}.import-progress{display:flex;align-items:center;gap:10px;margin-top:14px}.import-progress .progress-track{flex:1}.import-progress small{font-size:11px;color:#696973}
+.import-dialog>div{margin-top:18px}.import-dialog>div button:first-child{font-size:12px}

@@ -55,6 +55,13 @@ export async function uploadPhoto(file: File): Promise<string> {
   return (await api<{ id: string }>("/photos", { method: "POST", body: form })).id;
 }
 
+// Uploads a photo that was already prepared, e.g. one kept by the demo mode, without shrinking it again.
+export async function uploadPrepared(photo: Blob): Promise<string> {
+  const form = new FormData();
+  form.append("file", photo, photo.type === "image/png" ? "photo.png" : "photo.jpg");
+  return (await api<{ id: string }>("/photos", { method: "POST", body: form })).id;
+}
+
 // The small copy that maps and record cards draw. Like the server, it is made from the prepared photo.
 export async function prepareThumbnail(photo: Blob): Promise<Blob> {
   try {

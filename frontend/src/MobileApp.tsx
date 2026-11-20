@@ -1,12 +1,14 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { MapPin, Trash2, UserRound } from "lucide-react";
 import { api, deleteLocal, mostRecentTripForRegion, provinceIdForRegion, regionById, setUnauthorizedHandler, type Region, type Trip } from "./data";
 import AuthView, { type Account, type LegalDocName } from "./AuthView";
-import { DeleteAccountDialog, EmailDialog, RegionSearchSheet, TripDeleteDialog } from "./dialogs";
+import { countLocalData, importLocalData, type LocalCounts } from "./demoImport";
+import { DeleteAccountDialog, EmailDialog, ImportDemoSheet, RegionSearchSheet, TripDeleteDialog } from "./dialogs";
 import LegalScreen from "./screens/LegalScreen";
 import ResetPasswordScreen from "./screens/ResetPasswordScreen";
 import { parentOf, type Nav } from "./navigation.mjs";
 import ProvinceCoverSheet from "./ProvinceCoverSheet";
+import ShareMapSheet from "./ShareMapSheet";
 import MapScreen from "./screens/MapScreen";
 import MyScreen from "./screens/MyScreen";
 import ProvinceScreen from "./screens/ProvinceScreen";
@@ -31,6 +33,9 @@ export default function MobileApp() {
   const [recoveryCode, setRecoveryCode] = useState("");
   const [booting, setBooting] = useState(true);
   const [query, setQuery] = useState("");
+  // Demo records left on this device, offered to the signed-in account.
+  const [localCounts, setLocalCounts] = useState<LocalCounts | null>(null);
+  const importOffered = useRef(false);
 
   // The screen's 시·도, region and trip come from the URL, so they are looked up rather than kept as objects.
   const province = nav.provinceId ? regionById.get(nav.provinceId) ?? null : null;
@@ -62,6 +67,26 @@ export default function MobileApp() {
       void reload().finally(() => setBooting(false));
     }
   }, [mode]);
+  useEffect(() => {
+    if (mode !== "server" || !account) return setLocalCounts(null);
+    countLocalData().then(setLocalCounts).catch(() => setLocalCounts(null));
+  }, [mode, account?.username]);
+  const localTotal = localCounts ? localCounts.trips + localCounts.covers : 0;
+  // Asked once on the map after signing in; "나중에" holds until the browser tab is closed. MY keeps a button.
+  useEffect(() => {
+    if (!localTotal || importOffered.current || overlay || nav.screen !== "map") return;
+    importOffered.current = true;
+    if (!sessionStorage.getItem("chaeummdo-import-later")) navigation.openOverlay("import");
+  }, [localTotal, overlay, nav.screen]);
+  async function importDemo(onProgress: (done: number, total: number) => void) {
+    try {
+      await importLocalData(onProgress);
+    } finally {
+      await reload();
+      setLocalCounts(await countLocalData());
+    }
+    navigation.closeOverlay();
+  }
   // A link or a back step can name a trip that is gone (deleted, or another account's): show the screen above it.
   useEffect(() => {
     if (ready && nav.tripId && !trip && (nav.screen === "detail" || nav.screen === "form")) replace(parentOf(nav, regionById));
@@ -164,12 +189,14 @@ export default function MobileApp() {
       </div>}
       {screen === "my" && <MyScreen displayName={account?.displayName} email={account?.email} tripCount={trips.length} stats={stats} mode={mode}
         onMenu={toggleMenu} onProvince={openProvince} onLogout={() => void logout()} onAccountMode={() => setMode("server")}
-        onDeleteAccount={() => navigation.openOverlay("deleteAccount")} onEmail={() => navigation.openOverlay("email")} onLegal={openLegal} />}
+        onDeleteAccount={() => navigation.openOverlay("deleteAccount")} onEmail={() => navigation.openOverlay("email")} onLegal={openLegal}
+        localCount={localTotal} onImport={() => navigation.openOverlay("import")} />}
       {legal && <LegalScreen doc={legal} onBack={back} />}
       {overlay === "menu" && <div className="more-menu">
         <button onClick={() => openForm(screen === "detail")}>{screen === "detail" ? "기록 수정" : "여행기록 추가"}</button>
         {screen === "detail" && trip && <button className="danger" onClick={() => navigation.openOverlay("deleteTrip")}><Trash2 size={14} /> 기록 삭제</button>}
         <button onClick={() => navigation.openOverlay("search")}>지역 목록 보기</button>
+        {(screen === "map" || screen === "my") && <button onClick={() => navigation.openOverlay("share")}>지도 이미지 저장·공유</button>}
         <button onClick={switchMode}>{mode === "demo" ? "계정으로 로그인" : "기기 체험 모드"}</button>
       </div>}
     </div>
@@ -184,6 +211,9 @@ export default function MobileApp() {
     {overlay === "deleteTrip" && trip && region && <TripDeleteDialog trip={trip} region={region} onClose={navigation.closeOverlay} onDelete={deleteTrip} />}
     {overlay === "deleteAccount" && <DeleteAccountDialog onClose={navigation.closeOverlay} onDelete={deleteAccount} />}
     {overlay === "email" && <EmailDialog current={account?.email} onClose={navigation.closeOverlay} onSave={saveEmail} />}
+    {overlay === "share" && <ShareMapSheet trips={trips} covers={coverByRegion} stats={stats} onClose={navigation.closeOverlay} />}
+    {overlay === "import" && localCounts && <ImportDemoSheet counts={localCounts} onImport={importDemo}
+      onLater={() => { sessionStorage.setItem("chaeummdo-import-later", "1"); navigation.closeOverlay(); }} />}
     <Attribution />
   </div></div>;
 }

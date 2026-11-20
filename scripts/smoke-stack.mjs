@@ -29,7 +29,13 @@ for (const path of [script, "/data/map/boundaries.json"]) {
   if (path === script) assert.match(response.headers.get("cache-control") ?? "", /immutable/, `${path}: ${shown(response)}`);
   await response.arrayBuffer();
 }
+// Home screen install: phones read the manifest only with its own content type.
+const manifest = await get("/manifest.webmanifest");
+assert.match(manifest.headers.get("content-type") ?? "", /^application\/manifest\+json/, `manifest: ${shown(manifest)}`);
+const icons = (await manifest.json()).icons;
+assert.ok(icons.some((icon) => icon.sizes === "512x512" && icon.purpose === "maskable"), "manifest needs a maskable 512px icon");
+for (const icon of icons) assert.match((await get(icon.src)).headers.get("content-type") ?? "", /^image\/png/, icon.src);
 const redirect = await fetch(plainSite + "/", { redirect: "manual" });
 assert.equal(redirect.status, 308, `HTTP must redirect to HTTPS: ${shown(redirect)}`);
 assert.match(redirect.headers.get("location") ?? "", /^https:\/\//, `HTTP redirect target: ${shown(redirect)}`);
-console.log(`PASS: gzip behind Caddy (${script}, map boundaries), index.html/SPA no-cache, hashed asset immutable, HSTS + CSP, HTTP→HTTPS 308`);
+console.log(`PASS: gzip behind Caddy (${script}, map boundaries), index.html/SPA no-cache, hashed asset immutable, HSTS + CSP, manifest and icons, HTTP→HTTPS 308`);
