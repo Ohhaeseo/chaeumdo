@@ -6,7 +6,6 @@ import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.http.HttpStatus;
 import org.springframework.jdbc.core.simple.JdbcClient;
@@ -15,8 +14,6 @@ import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.server.ResponseStatusException;
 
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -28,12 +25,10 @@ public class AccountController {
   private final TravelerSession session;
   private final TransactionTemplate tx;
   private final BCryptPasswordEncoder passwords = new BCryptPasswordEncoder(12);
-  private final Path mediaRoot;
+  private final PhotoStore photos;
 
-  public AccountController(JdbcClient db, TravelerSession session, TransactionTemplate tx,
-                           @Value("${app.media-root}") String mediaRoot) {
-    this.db = db; this.session = session; this.tx = tx;
-    this.mediaRoot = Path.of(mediaRoot).toAbsolutePath().normalize();
+  public AccountController(JdbcClient db, TravelerSession session, TransactionTemplate tx, PhotoStore photos) {
+    this.db = db; this.session = session; this.tx = tx; this.photos = photos;
   }
   public record Account(String username, String displayName) {}
   public record Registration(@NotBlank @Pattern(regexp="[a-zA-Z0-9_]{4,32}") String username,
@@ -142,12 +137,8 @@ public class AccountController {
       .orElseThrow(()->new ResponseStatusException(HttpStatus.UNAUTHORIZED));
     if(!passwords.matches(input.password(),saved)) throw new ResponseStatusException(HttpStatus.UNAUTHORIZED,"비밀번호를 확인해 주세요.");
     List<String> keys=tx.execute(status->{
-      // Variant rows go with their photo by cascade, so their files are collected here first.
-      List<String> objects=db.sql("""
-        SELECT object_key FROM photo WHERE owner_id=:id
-        UNION ALL
-        SELECT variant.object_key FROM photo_variant variant JOIN photo ON photo.id=variant.photo_id WHERE photo.owner_id=:id
-        """).param("id",id).query(String.class).list();
+      // Variant and map photo rows go with their photo by cascade, so the files are collected first.
+      List<String> objects=photos.fileKeysOf(id);
       db.sql("DELETE FROM trip WHERE owner_id=:id").param("id",id).update();
       db.sql("DELETE FROM photo WHERE owner_id=:id").param("id",id).update();
       // traveler_session rows cascade, so the account is signed out on every device.
@@ -155,9 +146,6 @@ public class AccountController {
       return objects;
     });
     session.clear(req,res);
-    for(String key:keys) {
-      try { Files.deleteIfExists(mediaRoot.resolve(key)); }
-      catch(java.io.IOException ignored) { /* leftover file can be cleaned by media reconciliation */ }
-    }
+    photos.deleteFiles(keys);
   }
 }
