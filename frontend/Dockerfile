@@ -17,7 +17,7 @@ RUN origin() { printf '%s' "$1" | sed -E 's#^(https?://[^/]+).*#\1#'; }; \
     if [ -n "$VITE_PLACE_SEARCH_URL" ]; then sed -i "s#https://photon.komoot.io#$(origin "$VITE_PLACE_SEARCH_URL")#" nginx-security-headers.conf; fi; \
     grep -o "img-src[^;]*;\|connect-src[^;]*;" nginx-security-headers.conf
 
-FROM nginxinc/nginx-unprivileged:1.27-alpine
+FROM nginxinc/nginx-unprivileged:1.31-alpine
 COPY nginx.conf /etc/nginx/conf.d/default.conf
 # Kept outside conf.d, which nginx would otherwise load at http level.
 COPY --from=build /app/nginx-security-headers.conf /etc/nginx/security-headers.conf
