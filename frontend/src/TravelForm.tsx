@@ -1,18 +1,12 @@
 import React, { useEffect, useRef, useState } from "react";
 import { ArrowLeft, ImagePlus, LoaderCircle, MapPin, Plus, Search, X } from "lucide-react";
 import { api, districts, neighborhoods, provinceIdForRegion, provinces, regionById, regionIdsForTrip, saveLocal, type PlaceLocation, type Region, type Trip } from "./data";
-import { inclusiveDays } from "./dates.mjs";
+import { dayDate, inclusiveDays, stayLabel } from "./dates.mjs";
 import { searchPlaces, type PlaceSearchResult } from "./placeSearch";
 import { preparePhoto, prepareThumbnail, uploadPhoto } from "./photo";
 
 type PlacePhoto = File | string | null;
 type PlaceRow = { name: string; photo: PlacePhoto; location: PlaceLocation | null };
-
-function dayDate(start: string, offset: number) {
-  const date = new Date(`${start}T00:00:00Z`);
-  date.setUTCDate(date.getUTCDate() + offset);
-  return `${date.getUTCMonth() + 1}/${date.getUTCDate()}`;
-}
 
 function PlacePhotoPicker({ value, day, index, onChange }: {
   value: PlacePhoto;
@@ -322,7 +316,7 @@ export default function TravelForm({ region, trip, mode, onBack, onSaved }: {
         {preview ? <img src={preview} alt="대표 사진 미리보기" /> : <><Plus size={28} strokeWidth={1} /><span className="cover-hint">대표 사진 추가</span></>}
       </label>
       <section className="form-section"><h2>동행자</h2><div className="companion-list"><button className="round-plus" type="button" aria-label="동행자 추가" onClick={() => { focusAdded.current = true; setCompanions(previous => [...previous, ""]); }}><Plus size={17} /></button>{companions.map((name, index) => <div className="companion-entry" key={index}><input ref={element => { companionInputs.current[index] = element; }} aria-label={`동행자 ${index + 1} 이름`} placeholder="동행자 이름" maxLength={40} value={name} onChange={event => setCompanions(previous => previous.map((value, i) => i === index ? event.target.value : value))} /><button type="button" aria-label={`동행자 ${index + 1} 삭제`} onClick={() => setCompanions(previous => previous.filter((_, i) => i !== index))}><X size={14} /></button></div>)}</div></section>
-      <section className="form-section"><h2>여행 기록</h2><div className="form-dates"><input aria-label="시작일" type="date" required value={start} onChange={event => setStart(event.target.value)} /><span>~</span><input aria-label="종료일" type="date" required min={start} value={end} onChange={event => setEnd(event.target.value)} /></div>{count > 0 && count <= 366 && <p className="trip-duration">{count === 1 ? "당일치기" : `${count - 1}박 ${count}일`}</p>}{count > 0 && count <= 366 && Array.from({ length: count }, (_, day) => <div className="form-day" key={day}><h3>DAY {day + 1} <small>{dayDate(start, day)}</small></h3>{(places[day] || []).map((name, index) => <div className="form-place" key={index}><MapPin className="form-place-pin" size={16} fill="currentColor" /><PlaceSearchPicker value={name} location={placeLocations[day]?.[index] || null} day={day + 1} index={index + 1} onNameChange={value => updatePlace(day, index, value)} onSelect={result => selectPlace(day, index, result)} /><PlacePhotoPicker value={placePhotos[day]?.[index] || null} day={day + 1} index={index + 1} onChange={value => updatePlacePhoto(day, index, value)} /><button type="button" aria-label="장소 삭제" onClick={() => removePlace(day, index)}><X size={14} /></button></div>)}<button className="add-place" type="button" onClick={() => addPlace(day)}><Plus size={16} /> 방문장소 추가</button></div>)}</section>
+      <section className="form-section"><h2>여행 기록</h2><div className="form-dates"><input aria-label="시작일" type="date" required value={start} onChange={event => setStart(event.target.value)} /><span>~</span><input aria-label="종료일" type="date" required min={start} value={end} onChange={event => setEnd(event.target.value)} /></div>{count > 0 && count <= 366 && <p className="trip-duration">{stayLabel(count)}</p>}{count > 0 && count <= 366 && Array.from({ length: count }, (_, day) => <div className="form-day" key={day}><h3>DAY {day + 1} <small>{dayDate(start, day)}</small></h3>{(places[day] || []).map((name, index) => <div className="form-place" key={index}><MapPin className="form-place-pin" size={16} fill="currentColor" /><PlaceSearchPicker value={name} location={placeLocations[day]?.[index] || null} day={day + 1} index={index + 1} onNameChange={value => updatePlace(day, index, value)} onSelect={result => selectPlace(day, index, result)} /><PlacePhotoPicker value={placePhotos[day]?.[index] || null} day={day + 1} index={index + 1} onChange={value => updatePlacePhoto(day, index, value)} /><button type="button" aria-label="장소 삭제" onClick={() => removePlace(day, index)}><X size={14} /></button></div>)}<button className="add-place" type="button" onClick={() => addPlace(day)}><Plus size={16} /> 방문장소 추가</button></div>)}</section>
       {error && <p className="form-error" role="alert">{error}</p>}
       <button className="solid-button save-button" disabled={busy}>{busy ? "저장 중..." : "저장"}</button>
     </form>

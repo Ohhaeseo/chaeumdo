@@ -161,6 +161,25 @@ assert.equal(clearPlacePhoto.status, 200);
 const cleared = await (await fetch(base + "/trips", { headers })).json();
 assert.equal(cleared[0].placePhotoUrls[0][0], null);
 assert.equal(cleared[0].placePhotoThumbnailUrls[0][0], null);
+// Editing a trip deletes the cover or place photo it replaced, unless something else still uses it.
+const patchTrip = (body) => fetch(base + "/trips/" + list[0].id, {
+  method: "PATCH",
+  headers: { ...headers, "Content-Type": "application/json" },
+  body: JSON.stringify({ ...payload, regionId: "26110", regionIds: ["26110", "26350"], days: [["해변"], [], ["시장"]], ...body }),
+});
+const placeOnly = await uploadAs(headers);
+assert.equal((await patchTrip({ photoId: undefined, placePhotoIds: [[placeOnly], [], [null]] })).status, 200);
+assert.equal((await fetch(base + "/photos/" + placeOnly + "/thumbnail", { headers })).status, 200);
+assert.equal((await patchTrip({ photoId: undefined, placePhotoIds: [[null], [], [null]] })).status, 200);
+assert.equal((await fetch(base + "/photos/" + placeOnly, { headers })).status, 404, "a removed place photo is deleted");
+if (mediaRoot) assert.deepEqual(await mediaFiles(placeOnly), [], "a removed place photo leaves the disk");
+const swappedCover = await uploadAs(headers);
+assert.equal((await patchTrip({ photoId: swappedCover, placePhotoIds: undefined, placeLocations: undefined })).status, 200);
+assert.equal((await fetch(base + "/photos/" + photoId + "/thumbnail", { headers })).status, 200, "the old cover stays while the 부산 map photo uses it");
+const swapped = await (await fetch(base + "/trips", { headers })).json();
+assert.equal(swapped[0].thumbnailUrl, `/api/photos/${swappedCover}/thumbnail`);
+assert.deepEqual(swapped[0].days, [["해변"], [], ["시장"]]);
+assert.equal(swapped[0].placeLocations[0][0].sourceId, "W/307131", "omitted locations keep each place's pin");
 const otherUpdate = await fetch(base + "/trips/" + list[0].id, {
   method: "PATCH",
   headers: { ...otherHeaders, "Content-Type": "application/json" },
@@ -214,6 +233,7 @@ const deleted = await fetch(base + "/trips/" + list[0].id, {
 assert.equal(deleted.status, 200);
 assert.equal((await (await fetch(base + "/trips", { headers })).json()).length, 0);
 assert.equal((await fetch(base + "/photos/" + photoId + "/thumbnail", { headers })).status, 200, "the 부산 map photo still uses the deleted trip's photo");
+assert.equal((await fetch(base + "/photos/" + swappedCover, { headers })).status, 404, "trip deletion removes its current cover");
 assert.equal((await fetch(base + "/region-covers/26", { method: "DELETE", headers })).status, 200);
 assert.equal((await fetch(base + "/photos/" + photoId, { headers })).status, 404);
 assert.equal((await fetch(base + "/photos/" + photoId + "/thumbnail", { headers })).status, 404);
@@ -237,5 +257,5 @@ for (const accountHeaders of [headers, otherHeaders]) {
 assert.equal((await fetch(base + "/photos/" + leftoverId + "/thumbnail", { headers: otherHeaders })).status, 401);
 if (mediaRoot) assert.deepEqual(await mediaFiles(leftoverId), [], "account deletion removes original and thumbnail files");
 console.log(
-  `PASS: public regions without session, 17 provinces + 250 districts + 3,627 neighborhoods, 10-digit multi-region trips, account-only upload/read, private photo cache, owner isolation, 320px cover/place thumbnail URLs and read/cache/owner isolation/cleanup on trip and account deletion${mediaRoot ? " (files checked on disk)" : ""}, 시·도 map photos (any 시·도, owner/level checks, replace/remove/trip/account cleanup), place photo/location save/retain/remove, atomic retry, create/update/delete, stats, invalid dates/day count, request header protection, JSON error message`,
+  `PASS: public regions without session, 17 provinces + 250 districts + 3,627 neighborhoods, 10-digit multi-region trips, account-only upload/read, private photo cache, owner isolation, 320px cover/place thumbnail URLs and read/cache/owner isolation/cleanup on trip and account deletion${mediaRoot ? " (files checked on disk)" : ""}, 시·도 map photos (any 시·도, owner/level checks, replace/remove/trip/account cleanup), place photo/location save/retain/remove, replaced cover/place photos deleted on edit, atomic retry, create/update/delete, stats, invalid dates/day count, request header protection, JSON error message`,
 );

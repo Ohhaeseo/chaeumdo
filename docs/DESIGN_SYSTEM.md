@@ -46,4 +46,4 @@ S-Core Dream 원본 OTF를 self-host한다. 300·400·500·600 굵기를 선언�
 - 복구 코드는 가입·비밀번호 변경 후 한 번만 표시한다. 삭제는 비밀번호 재확인 대화상자로 시작한다.
 - 기록 삭제는 상세 화면의 더보기에서 시작하며 지역·날짜와 사진 정리 범위를 확인한 뒤 실행한다. 취소를 기본 안전 경로로 제공한다.
 
-구현 위치: `frontend/src/styles.css`, `frontend/src/MobileApp.tsx`, `frontend/src/AuthView.tsx`, `frontend/src/TravelForm.tsx`, `frontend/src/KoreaMap.tsx`.
+구현 위치: `frontend/src/styles.css`, `frontend/src/MobileApp.tsx`(화면 전환), `frontend/src/screens/`(지도·시·도·지역·기록 상세·MY 화면), `frontend/src/dialogs.tsx`, `frontend/src/AuthView.tsx`, `frontend/src/TravelForm.tsx`, `frontend/src/KoreaMap.tsx`.
