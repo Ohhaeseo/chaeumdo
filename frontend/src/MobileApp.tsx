@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
 import { MapPin, Trash2, UserRound } from "lucide-react";
 import { api, deleteLocal, mostRecentTripForRegion, provinceIdForRegion, regionById, setUnauthorizedHandler, type Region, type Trip } from "./data";
-import AuthView, { type Account } from "./AuthView";
-import { DeleteAccountDialog, RegionSearchSheet, TripDeleteDialog } from "./dialogs";
+import AuthView, { type Account, type LegalDocName } from "./AuthView";
+import { DeleteAccountDialog, EmailDialog, RegionSearchSheet, TripDeleteDialog } from "./dialogs";
+import LegalScreen from "./screens/LegalScreen";
+import ResetPasswordScreen from "./screens/ResetPasswordScreen";
 import { parentOf, type Nav } from "./navigation.mjs";
 import ProvinceCoverSheet from "./ProvinceCoverSheet";
 import MapScreen from "./screens/MapScreen";
@@ -16,6 +18,9 @@ import { Attribution, SplashView } from "./ui";
 import { MAP, useNavigation } from "./useNavigation";
 import { useTravelData, type Mode } from "./useTravelData";
 import "./styles.css";
+
+// A reset link carries its token after "#". It is read once here, before the app rewrites the address.
+const resetToken = location.pathname === "/reset-password" ? new URLSearchParams(location.hash.slice(1)).get("token") : null;
 
 export default function MobileApp() {
   const [mode, setMode] = useState<Mode>(() => localStorage.getItem("chaeummdo-mode") === "demo" ? "demo" : "server");
@@ -104,12 +109,33 @@ export default function MobileApp() {
     navigation.closeOverlay();
     setMode(mode === "demo" ? "server" : "demo");
   }
+  const openLegal = (doc: LegalDocName) => push({ screen: doc });
+  async function saveEmail(email: string | null, password: string) {
+    setAccount(await api<Account>("/auth/email", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email, password }) }));
+    navigation.closeOverlay();
+  }
+  // The reset signed this browser in to the account whose password was reset.
+  async function finishReset() {
+    setAccount(await api<Account>("/auth/me"));
+    replace(MAP);
+    if (mode === "server") await reload();
+    else setMode("server");
+  }
 
   if (booting) return <SplashView />;
+  if (nav.screen === "reset-password") return <div className="page-canvas"><div className="phone auth-phone">
+    <ResetPasswordScreen token={resetToken} onDone={finishReset} onCancel={() => replace(MAP)} />
+    <Attribution />
+  </div></div>;
+  const legal = nav.screen === "privacy" || nav.screen === "terms" ? nav.screen : null;
+  // Signed out, the terms open over the sign-in screens, which stay mounted so a half-filled form survives.
   if (mode === "server" && !account) return <div className="page-canvas"><div className="phone auth-phone">
-    <AuthView screen={navigation.authScreen} setScreen={navigation.showAuth} loading={loading} onDemo={() => setMode("demo")}
-      onAuthenticated={async next => { setAccount(next); navigation.finishAuth(); await reload(); }}
-      recoveryCode={recoveryCode} setRecoveryCode={setRecoveryCode} />
+    {legal && <div className="app-content"><LegalScreen doc={legal} onBack={back} /></div>}
+    <div style={{ display: legal ? "none" : "contents" }}>
+      <AuthView screen={navigation.authScreen} setScreen={navigation.showAuth} loading={loading} onDemo={() => setMode("demo")}
+        onAuthenticated={async next => { setAccount(next); navigation.finishAuth(); await reload(); }} onLegal={openLegal}
+        recoveryCode={recoveryCode} setRecoveryCode={setRecoveryCode} />
+    </div>
     <Attribution />
   </div></div>;
 
@@ -136,9 +162,10 @@ export default function MobileApp() {
         <h1>{region?.fullName} 여행 기록 완료 !</h1>
         <button className="solid-button" onClick={() => replace(doneNav)}>지도에서 보기</button>
       </div>}
-      {screen === "my" && <MyScreen displayName={account?.displayName} tripCount={trips.length} stats={stats} mode={mode}
+      {screen === "my" && <MyScreen displayName={account?.displayName} email={account?.email} tripCount={trips.length} stats={stats} mode={mode}
         onMenu={toggleMenu} onProvince={openProvince} onLogout={() => void logout()} onAccountMode={() => setMode("server")}
-        onDeleteAccount={() => navigation.openOverlay("deleteAccount")} />}
+        onDeleteAccount={() => navigation.openOverlay("deleteAccount")} onEmail={() => navigation.openOverlay("email")} onLegal={openLegal} />}
+      {legal && <LegalScreen doc={legal} onBack={back} />}
       {overlay === "menu" && <div className="more-menu">
         <button onClick={() => openForm(screen === "detail")}>{screen === "detail" ? "기록 수정" : "여행기록 추가"}</button>
         {screen === "detail" && trip && <button className="danger" onClick={() => navigation.openOverlay("deleteTrip")}><Trash2 size={14} /> 기록 삭제</button>}
@@ -156,6 +183,7 @@ export default function MobileApp() {
       mode={mode} onClose={navigation.closeOverlay} onChanged={reload} />}
     {overlay === "deleteTrip" && trip && region && <TripDeleteDialog trip={trip} region={region} onClose={navigation.closeOverlay} onDelete={deleteTrip} />}
     {overlay === "deleteAccount" && <DeleteAccountDialog onClose={navigation.closeOverlay} onDelete={deleteAccount} />}
+    {overlay === "email" && <EmailDialog current={account?.email} onClose={navigation.closeOverlay} onSave={saveEmail} />}
     <Attribution />
   </div></div>;
 }

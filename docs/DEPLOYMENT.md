@@ -33,6 +33,28 @@ docker compose --env-file .env.production -f compose.production.yaml up -d
 
 값은 빌드할 때 앱에 들어갑니다. 브라우저가 이 공급자에만 접속하도록 Content-Security-Policy의 `img-src`·`connect-src`도 같은 주소로 바뀝니다. 비워 두면 기본값을 씁니다. 카카오·네이버처럼 자체 지도 SDK가 필요한 공급자, 그리고 검색 응답 형식이 Photon과 다른 공급자는 코드 수정이 필요합니다(`frontend/src/providers.ts`, `placeSearch.ts`).
 
+### 비밀번호 재설정 메일
+
+로그인 화면의 "이메일로 찾기"는 계정에 등록된 이메일로 아이디와 30분짜리 재설정 링크를 보냅니다. 링크는 `https://DOMAIN/reset-password#token=…` 형식입니다(`PUBLIC_URL`은 compose가 `DOMAIN`으로 채웁니다). 메일 발송 서비스(SMTP)를 정해 `.env.production`에 넣습니다.
+
+| 변수 | 의미 |
+|---|---|
+| `MAIL_HOST`, `MAIL_PORT` | SMTP 서버와 포트(기본 587, STARTTLS) |
+| `MAIL_USERNAME`, `MAIL_PASSWORD` | SMTP 인증 정보 |
+| `MAIL_FROM` | 보내는 주소. 비우면 `no-reply@DOMAIN` |
+
+- `MAIL_HOST`가 없으면 운영에서는 메일을 보내지 않고 "이메일로 찾기"가 503을 돌려줍니다. 개발 실행(기본 프로필)은 메일을 서버 로그에 남깁니다.
+- 받는 쪽 스팸함에 빠지지 않도록 보내는 도메인의 SPF·DKIM 설정을 메일 서비스 안내대로 해 주세요.
+- 같은 계정에는 5분에 한 번만 보냅니다. 응답은 계정이 있든 없든 같아서, 이 화면으로 가입 여부를 알 수 없습니다.
+
+### 이용약관과 개인정보처리방침
+
+`frontend/src/legal.ts`에 초안이 있고 `/terms`, `/privacy`에서 보입니다. 가입할 때 "(필수) 만 14세 이상이며 이용약관과 개인정보처리방침에 동의합니다"를 받아, 동의 시각과 `TERMS_VERSION`을 계정에 기록합니다.
+
+- 공개 전에 `{{…}}` 빈칸(운영자명, 보호책임자, 위탁 업체, 국외 이전, 관할 법원, 시행일 등)을 채우고 법률 검토를 받습니다. 빈칸이 남아 있으면 문서 위에 "초안" 안내가 보입니다.
+- 지도·검색·메일 공급자를 바꾸면 처리방침 6항(위탁·외부 서비스)도 같이 고칩니다.
+- 문서를 고치면 `TERMS_VERSION`을 바꿉니다. 약관이 생기기 전에 가입한 계정에는 동의 기록이 없습니다.
+
 ### 사진 처리 한도와 정리
 
 - 서버는 JPEG·PNG, 15MB, 2,500만 화소까지 받습니다. 웹 앱은 긴 변 2048px로 줄여서 올립니다.
@@ -100,3 +122,5 @@ docker compose --env-file .env.production -f compose.production.yaml exec backen
 - `BACKUP_DIR`을 서버 밖 저장소로 매일 복사하는 작업 설정
 - 지도 타일·장소 검색 공급자를 공개 서비스용으로 설정(`MAP_TILE_URL`, `PLACE_SEARCH_URL`)
 - `backup` 서비스 로그에 `backup: …` 줄이 남는지 확인(`docker compose … logs backup`)
+- 이용약관·개인정보처리방침의 빈칸을 채우고 법률 검토 완료, `TERMS_VERSION` 갱신
+- SMTP 설정 후 "이메일로 찾기"로 재설정 메일이 실제로 도착하는지 확인

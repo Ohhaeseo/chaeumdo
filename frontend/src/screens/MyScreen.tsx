@@ -1,10 +1,14 @@
-import { MoreHorizontal, UserRound } from "lucide-react";
+import { ChevronRight, Mail, MoreHorizontal, UserRound } from "lucide-react";
+import { LegalLinks, type LegalDocName } from "../AuthView";
 import { districts, regionById, type Region } from "../data";
 import type { TravelStats } from "../travelStats";
 import type { Mode } from "../useTravelData";
 
-export default function MyScreen({ displayName, tripCount, stats, mode, onMenu, onProvince, onLogout, onAccountMode, onDeleteAccount }: {
+export default function MyScreen({ displayName, email, tripCount, stats, mode, onMenu, onProvince, onLogout, onAccountMode, onDeleteAccount, onEmail, onLegal }: {
   displayName?: string;
+  email?: string | null;
+  onEmail: () => void;
+  onLegal: (doc: LegalDocName) => void;
   tripCount: number;
   stats: TravelStats;
   mode: Mode;
@@ -44,10 +48,16 @@ export default function MyScreen({ displayName, tripCount, stats, mode, onMenu, 
         </button>)}
       </div>
     </section>
+    {mode === "server" && <button className="legacy-region-card email-card" onClick={onEmail}>
+      <Mail size={16} strokeWidth={1.4} />
+      <span className="cover-card-text"><b>복구용 이메일</b><small>{email || "등록하면 비밀번호를 잊어도 메일로 찾을 수 있어요"}</small></span>
+      <ChevronRight size={18} />
+    </button>}
     <div className="account-actions">
       {mode === "server"
         ? <><button onClick={onLogout}>로그아웃</button><button className="danger" onClick={onDeleteAccount}>계정 삭제</button></>
         : <button onClick={onAccountMode}>계정으로 로그인</button>}
     </div>
+    <LegalLinks onLegal={onLegal} />
   </>;
 }

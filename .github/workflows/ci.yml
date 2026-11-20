@@ -93,6 +93,9 @@ jobs:
           DB_USER: chaeummdo
           DB_PASSWORD: ci-only-password
           MEDIA_ROOT: ${{ runner.temp }}/media
+          PUBLIC_URL: https://chaeummdo.example
+          # Mail goes to files here, where smoke-account.mjs reads the reset link.
+          MAIL_OUTBOX: ${{ runner.temp }}/outbox
         run: |
           mkdir -p "$MEDIA_ROOT"
           java -jar backend/target/chaeummdo-*.jar > "$RUNNER_TEMP/backend.log" 2>&1 &
@@ -116,6 +119,8 @@ jobs:
           exit 1
       - run: node scripts/smoke-api.mjs
       - run: node scripts/smoke-account.mjs
+        env:
+          MAIL_OUTBOX: ${{ runner.temp }}/outbox
       - name: Backend log
         if: failure()
         run: cat "$RUNNER_TEMP/backend.log"

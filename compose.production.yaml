@@ -32,6 +32,15 @@ services:
       DB_USER: chaeummdo
       DB_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
       MEDIA_ROOT: /app/data/media
+      PUBLIC_URL: https://${DOMAIN:?DOMAIN is required}
+      # SMTP for password reset mail (docs/DEPLOYMENT.md). Without MAIL_HOST, email recovery answers 503.
+      MAIL_HOST: ${MAIL_HOST:-}
+      MAIL_PORT: ${MAIL_PORT:-587}
+      MAIL_USERNAME: ${MAIL_USERNAME:-}
+      MAIL_PASSWORD: ${MAIL_PASSWORD:-}
+      MAIL_STARTTLS: ${MAIL_STARTTLS:-true}
+      MAIL_FROM: ${MAIL_FROM:-}
+      TERMS_VERSION: ${TERMS_VERSION:-draft-2026-11}
     volumes:
       - media-data:/app/data/media
     depends_on:

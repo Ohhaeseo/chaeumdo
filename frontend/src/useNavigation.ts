@@ -4,7 +4,7 @@ import { regionById } from "./data";
 import { MAP, navFromLocation, parentOf, pathFor, sameNav, type Nav } from "./navigation.mjs";
 
 export type { Nav };
-export type Overlay = "menu" | "search" | "cover" | "deleteTrip" | "deleteAccount";
+export type Overlay = "menu" | "search" | "cover" | "deleteTrip" | "deleteAccount" | "email";
 
 // One browser history entry. depth counts the app's entries behind it: 0 means going back would leave the app.
 type Entry = { app: "chaeummdo"; depth: number; nav: Nav; overlay?: Overlay; auth?: AuthScreen; scrollY?: number };

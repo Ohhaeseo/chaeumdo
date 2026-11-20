@@ -31,6 +31,38 @@ export function DeleteAccountDialog({ onClose, onDelete }: { onClose: () => void
   </div>;
 }
 
+// Changing or removing the recovery email needs the password, like the server checks.
+export function EmailDialog({ current, onClose, onSave }: { current?: string | null; onClose: () => void; onSave: (email: string | null, password: string) => Promise<void> }) {
+  const [email, setEmail] = useState(current || "");
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+  const save = async (next: string | null) => {
+    setBusy(true);
+    setError("");
+    try {
+      await onSave(next, password);
+    } catch (failure) {
+      setError(failure instanceof Error ? failure.message : "이메일을 저장하지 못했어요.");
+      setBusy(false);
+    }
+  };
+  return <div className="sheet-backdrop" onClick={() => !busy && onClose()}>
+    <form className="delete-dialog email-dialog" onClick={event => event.stopPropagation()} onSubmit={event => { event.preventDefault(); void save(email.trim() || null); }}>
+      <h2>복구용 이메일</h2>
+      <p>비밀번호와 복구 코드를 모두 잊었을 때 이 주소로 재설정 링크를 보내 드려요.</p>
+      <input type="email" aria-label="이메일" placeholder="이메일" autoComplete="email" maxLength={254} value={email} onChange={event => setEmail(event.target.value)} />
+      <input type="password" aria-label="비밀번호 확인" placeholder="비밀번호 확인" autoComplete="current-password" required value={password} onChange={event => setPassword(event.target.value)} />
+      {error && <p className="form-error" role="alert">{error}</p>}
+      <div>
+        <button type="button" disabled={busy} onClick={onClose}>취소</button>
+        <button className="solid-button" disabled={busy}>{busy ? "저장 중..." : "저장"}</button>
+      </div>
+      {current && <button type="button" className="email-remove" disabled={busy || !password} onClick={() => void save(null)}>이메일 지우기</button>}
+    </form>
+  </div>;
+}
+
 export function TripDeleteDialog({ trip, region, onClose, onDelete }: { trip: Trip; region: Region; onClose: () => void; onDelete: () => Promise<void> }) {
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);

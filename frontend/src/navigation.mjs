@@ -7,8 +7,10 @@
 //   /regions/:id/trips/:trip            기록 상세
 //   /regions/:id/trips/:trip/edit       기록 수정
 //   /new?region=:id                     기록 추가
+//   /privacy, /terms                    개인정보처리방침, 이용약관 (로그인하지 않아도 열림)
+//   /reset-password#token=…             메일로 받은 비밀번호 재설정 링크
 
-/** @typedef {"map" | "districts" | "my" | "region" | "detail" | "form" | "complete"} Screen */
+/** @typedef {"map" | "districts" | "my" | "region" | "detail" | "form" | "complete" | "privacy" | "terms" | "reset-password"} Screen */
 /** @typedef {{ screen: Screen, provinceId?: string, regionId?: string, tripId?: string, editing?: boolean }} Nav */
 /** @typedef {{ level: string, parentId: string | null }} RegionNode */
 /** @typedef {Map<string, RegionNode>} RegionLookup */
@@ -20,6 +22,10 @@ export const MAP = { screen: "map" };
 export function pathFor(nav) {
   switch (nav.screen) {
     case "my": return "/my";
+    case "privacy": return "/privacy";
+    case "terms": return "/terms";
+    // The token stays in the fragment, which never leaves the browser.
+    case "reset-password": return "/reset-password";
     case "districts": return `/provinces/${nav.provinceId}`;
     // The completion screen is not worth a URL of its own; a refresh there shows the saved region.
     case "region": case "complete": return `/regions/${nav.regionId}`;
@@ -50,7 +56,7 @@ export function navFromLocation(pathname, search, regions) {
   } catch {
     return MAP;
   }
-  if (parts.length === 1 && parts[0] === "my") return { screen: "my" };
+  if (parts.length === 1 && ["my", "privacy", "terms", "reset-password"].includes(parts[0])) return { screen: /** @type {Screen} */ (parts[0]) };
   if (parts.length === 2 && parts[0] === "provinces" && regions.get(parts[1])?.level === "province") return { screen: "districts", provinceId: parts[1] };
   if (parts[0] === "regions" && regions.has(parts[1])) {
     const regionId = parts[1];
