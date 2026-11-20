@@ -148,5 +148,5 @@ export async function shareOrSave(blob: Blob, share: boolean): Promise<"shared" 
   return "saved";
 }
 
-export const canShareFiles = () => typeof navigator.canShare === "function"
-  && navigator.canShare({ files: [new File([new Blob()], "x.jpg", { type: "image/jpeg" })] });
+export const canShareFiles = () =>
+  typeof navigator.canShare === "function" && navigator.canShare({ files: [new File([new Blob()], "x.jpg", { type: "image/jpeg" })] });

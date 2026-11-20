@@ -40,7 +40,9 @@ function mapFile<T>(file: string, validate: (value: unknown) => T) {
         })
         .then(validate)
         .then(value => (cached = value))
-        .finally(() => { pending = null; });
+        .finally(() => {
+          pending = null;
+        });
     }
     return pending;
   }
@@ -52,12 +54,16 @@ function mapFile<T>(file: string, validate: (value: unknown) => T) {
     useEffect(() => {
       let active = true;
       setError("");
-      void load().then(value => {
-        if (active) setData(value);
-      }).catch(reason => {
-        if (active) setError(reason instanceof Error ? reason.message : "지도 데이터를 불러오지 못했습니다.");
-      });
-      return () => { active = false; };
+      void load()
+        .then(value => {
+          if (active) setData(value);
+        })
+        .catch(reason => {
+          if (active) setError(reason instanceof Error ? reason.message : "지도 데이터를 불러오지 못했습니다.");
+        });
+      return () => {
+        active = false;
+      };
     }, [requestKey]);
 
     const retry = useCallback(() => {
@@ -75,7 +81,12 @@ function mapFile<T>(file: string, validate: (value: unknown) => T) {
 function validateBoundaries(value: unknown): MapBoundaries {
   if (!value || typeof value !== "object") throw new Error("지도 데이터 형식이 올바르지 않습니다.");
   const candidate = value as Partial<MapBoundaries>;
-  if (!candidate.provinces || Object.keys(candidate.provinces).length !== 17 || !Array.isArray(candidate.districts) || candidate.districts.length !== 250) {
+  if (
+    !candidate.provinces ||
+    Object.keys(candidate.provinces).length !== 17 ||
+    !Array.isArray(candidate.districts) ||
+    candidate.districts.length !== 250
+  ) {
     throw new Error("지도 데이터가 완전하지 않습니다.");
   }
   return candidate as MapBoundaries;

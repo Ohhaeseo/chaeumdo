@@ -33,9 +33,16 @@ export async function importLocalData(onProgress: (done: number, total: number) 
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        requestId: trip.id, regionId: trip.regionId, regionIds: regionIdsForTrip(trip), photoId,
-        startDate: trip.startDate, endDate: trip.endDate, companion: trip.companion, days: trip.days,
-        placePhotoIds, placeLocations: trip.placeLocations ?? null,
+        requestId: trip.id,
+        regionId: trip.regionId,
+        regionIds: regionIdsForTrip(trip),
+        photoId,
+        startDate: trip.startDate,
+        endDate: trip.endDate,
+        companion: trip.companion,
+        days: trip.days,
+        placePhotoIds,
+        placeLocations: trip.placeLocations ?? null,
       }),
     });
     await deleteLocal(trip.id);
@@ -44,7 +51,11 @@ export async function importLocalData(onProgress: (done: number, total: number) 
   for (const cover of covers) {
     if (!taken.has(cover.regionId)) {
       const photoId = await uploadPrepared(cover.photo);
-      await api(`/region-covers/${cover.regionId}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ photoId }) });
+      await api(`/region-covers/${cover.regionId}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ photoId }),
+      });
     }
     await deleteLocalRegionCover(cover.regionId);
     onProgress(++done, total);

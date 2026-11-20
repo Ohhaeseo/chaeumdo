@@ -3,7 +3,10 @@ import { inclusiveDays } from "./dates.mjs";
 
 // Everything the map, region lists and MY derive from the trips. Visiting is never stored; it comes from here.
 export function travelStats(trips: Trip[], year = String(new Date().getFullYear())) {
-  const districtsOf = (trip: Trip) => regionIdsForTrip(trip).map(districtIdForRegion).filter((id): id is string => Boolean(id));
+  const districtsOf = (trip: Trip) =>
+    regionIdsForTrip(trip)
+      .map(districtIdForRegion)
+      .filter((id): id is string => Boolean(id));
   const visited = new Set(trips.flatMap(regionIdsForTrip));
   const visitedProvinces = new Set(trips.flatMap(trip => regionIdsForTrip(trip).map(provinceIdForRegion)));
   const visitedDistricts = new Set(trips.flatMap(districtsOf));
@@ -16,7 +19,7 @@ export function travelStats(trips: Trip[], year = String(new Date().getFullYear(
   const provinceProgress = provinces.map(region => {
     const children = districts.filter(district => district.parentId === region.id);
     const count = children.filter(district => visitedDistricts.has(district.id)).length;
-    return { region, count, total: children.length, percent: children.length ? Math.round(count / children.length * 100) : 0 };
+    return { region, count, total: children.length, percent: children.length ? Math.round((count / children.length) * 100) : 0 };
   });
   return {
     year,
@@ -26,7 +29,7 @@ export function travelStats(trips: Trip[], year = String(new Date().getFullYear(
     thisYearDistricts,
     topDistrict,
     provinceProgress,
-    nationalPercent: Math.round(visitedDistricts.size / districts.length * 100),
+    nationalPercent: Math.round((visitedDistricts.size / districts.length) * 100),
     totalDays: trips.reduce((sum, trip) => sum + inclusiveDays(trip.startDate, trip.endDate), 0),
   };
 }

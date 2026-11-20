@@ -1,6 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { MapPin, Trash2, UserRound } from "lucide-react";
-import { api, deleteLocal, mostRecentTripForRegion, provinceIdForRegion, regionById, setUnauthorizedHandler, type Region, type Trip } from "./data";
+import {
+  api,
+  deleteLocal,
+  mostRecentTripForRegion,
+  provinceIdForRegion,
+  regionById,
+  setUnauthorizedHandler,
+  type Region,
+  type Trip,
+} from "./data";
 import AuthView, { type Account, type LegalDocName } from "./AuthView";
 import { countLocalData, importLocalData, type LocalCounts } from "./demoImport";
 import { DeleteAccountDialog, EmailDialog, ImportDemoSheet, RegionSearchSheet, TripDeleteDialog } from "./dialogs";
@@ -25,7 +34,7 @@ import "./styles.css";
 const resetToken = location.pathname === "/reset-password" ? new URLSearchParams(location.hash.slice(1)).get("token") : null;
 
 export default function MobileApp() {
-  const [mode, setMode] = useState<Mode>(() => localStorage.getItem("chaeummdo-mode") === "demo" ? "demo" : "server");
+  const [mode, setMode] = useState<Mode>(() => (localStorage.getItem("chaeummdo-mode") === "demo" ? "demo" : "server"));
   const { trips, covers, loading, setLoading, error, reload, clear } = useTravelData(mode);
   const navigation = useNavigation();
   const { nav, overlay, push, replace, back } = navigation;
@@ -38,9 +47,9 @@ export default function MobileApp() {
   const importOffered = useRef(false);
 
   // The screen's 시·도, region and trip come from the URL, so they are looked up rather than kept as objects.
-  const province = nav.provinceId ? regionById.get(nav.provinceId) ?? null : null;
-  const region = nav.regionId ? regionById.get(nav.regionId) ?? null : null;
-  const trip = nav.tripId ? trips.find(item => item.id === nav.tripId) ?? null : null;
+  const province = nav.provinceId ? (regionById.get(nav.provinceId) ?? null) : null;
+  const region = nav.regionId ? (regionById.get(nav.regionId) ?? null) : null;
+  const trip = nav.tripId ? (trips.find(item => item.id === nav.tripId) ?? null) : null;
   const stats = useMemo(() => travelStats(trips), [trips]);
   const coverByRegion = useMemo(() => new Map(covers.map(cover => [cover.regionId, cover])), [covers]);
   const ready = !booting && !loading && (mode === "demo" || account !== null);
@@ -54,22 +63,32 @@ export default function MobileApp() {
     if (mode !== "server") return;
     setUnauthorizedHandler(signedOut);
     return () => setUnauthorizedHandler(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- registered per mode; signedOut only calls setters and history
   }, [mode]);
   useEffect(() => {
     localStorage.setItem("chaeummdo-mode", mode);
     if (mode === "server") {
       setLoading(true);
-      api<Account>("/auth/me").then(setAccount).then(() => reload())
-        .catch(() => { setAccount(null); setLoading(false); })
+      api<Account>("/auth/me")
+        .then(setAccount)
+        .then(() => reload())
+        .catch(() => {
+          setAccount(null);
+          setLoading(false);
+        })
         .finally(() => setBooting(false));
     } else {
       setAccount(null);
       void reload().finally(() => setBooting(false));
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- starts each mode once, not again when reload changes with it
   }, [mode]);
   useEffect(() => {
     if (mode !== "server" || !account) return setLocalCounts(null);
-    countLocalData().then(setLocalCounts).catch(() => setLocalCounts(null));
+    countLocalData()
+      .then(setLocalCounts)
+      .catch(() => setLocalCounts(null));
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- recount only when the signed-in account changes
   }, [mode, account?.username]);
   const localTotal = localCounts ? localCounts.trips + localCounts.covers : 0;
   // Asked once on the map after signing in; "나중에" holds until the browser tab is closed. MY keeps a button.
@@ -77,6 +96,7 @@ export default function MobileApp() {
     if (!localTotal || importOffered.current || overlay || nav.screen !== "map") return;
     importOffered.current = true;
     if (!sessionStorage.getItem("chaeummdo-import-later")) navigation.openOverlay("import");
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- navigation is a new object on every render
   }, [localTotal, overlay, nav.screen]);
   async function importDemo(onProgress: (done: number, total: number) => void) {
     try {
@@ -90,6 +110,7 @@ export default function MobileApp() {
   // A link or a back step can name a trip that is gone (deleted, or another account's): show the screen above it.
   useEffect(() => {
     if (ready && nav.tripId && !trip && (nav.screen === "detail" || nav.screen === "form")) replace(parentOf(nav, regionById));
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- replace is a new function on every render
   }, [ready, nav, trip]);
 
   function openProvince(next: Region) {
@@ -104,7 +125,12 @@ export default function MobileApp() {
   function openForm(edit = false) {
     if (edit) push({ ...nav, screen: "form", editing: true });
     // Adding from a 시·도 map starts the form in that 시·도; from the map or MY it starts empty.
-    else push({ screen: "form", provinceId: nav.provinceId, regionId: nav.screen === "districts" ? nav.provinceId : nav.screen === "map" || nav.screen === "my" ? undefined : nav.regionId });
+    else
+      push({
+        screen: "form",
+        provinceId: nav.provinceId,
+        regionId: nav.screen === "districts" ? nav.provinceId : nav.screen === "map" || nav.screen === "my" ? undefined : nav.regionId,
+      });
   }
   function openTab(next: "map" | "my") {
     if (nav.screen === next) return navigation.closeOverlay();
@@ -112,7 +138,7 @@ export default function MobileApp() {
     if (next === "my") push({ screen: "my" });
     else back();
   }
-  const toggleMenu = () => overlay === "menu" ? navigation.closeOverlay() : navigation.openOverlay("menu");
+  const toggleMenu = () => (overlay === "menu" ? navigation.closeOverlay() : navigation.openOverlay("menu"));
 
   async function logout() {
     await api("/auth/logout", { method: "POST" });
@@ -136,7 +162,13 @@ export default function MobileApp() {
   }
   const openLegal = (doc: LegalDocName) => push({ screen: doc });
   async function saveEmail(email: string | null, password: string) {
-    setAccount(await api<Account>("/auth/email", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email, password }) }));
+    setAccount(
+      await api<Account>("/auth/email", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email, password }),
+      }),
+    );
     navigation.closeOverlay();
   }
   // The reset signed this browser in to the account whose password was reset.
@@ -148,72 +180,202 @@ export default function MobileApp() {
   }
 
   if (booting) return <SplashView />;
-  if (nav.screen === "reset-password") return <div className="page-canvas"><div className="phone auth-phone">
-    <ResetPasswordScreen token={resetToken} onDone={finishReset} onCancel={() => replace(MAP)} />
-    <Attribution />
-  </div></div>;
+  if (nav.screen === "reset-password")
+    return (
+      <div className="page-canvas">
+        <div className="phone auth-phone">
+          <ResetPasswordScreen token={resetToken} onDone={finishReset} onCancel={() => replace(MAP)} />
+          <Attribution />
+        </div>
+      </div>
+    );
   const legal = nav.screen === "privacy" || nav.screen === "terms" ? nav.screen : null;
   // Signed out, the terms open over the sign-in screens, which stay mounted so a half-filled form survives.
-  if (mode === "server" && !account) return <div className="page-canvas"><div className="phone auth-phone">
-    {legal && <div className="app-content"><LegalScreen doc={legal} onBack={back} /></div>}
-    <div style={{ display: legal ? "none" : "contents" }}>
-      <AuthView screen={navigation.authScreen} setScreen={navigation.showAuth} loading={loading} onDemo={() => setMode("demo")}
-        onAuthenticated={async next => { setAccount(next); navigation.finishAuth(); await reload(); }} onLegal={openLegal}
-        recoveryCode={recoveryCode} setRecoveryCode={setRecoveryCode} />
-    </div>
-    <Attribution />
-  </div></div>;
+  if (mode === "server" && !account)
+    return (
+      <div className="page-canvas">
+        <div className="phone auth-phone">
+          {legal && (
+            <div className="app-content">
+              <LegalScreen doc={legal} onBack={back} />
+            </div>
+          )}
+          <div style={{ display: legal ? "none" : "contents" }}>
+            <AuthView
+              screen={navigation.authScreen}
+              setScreen={navigation.showAuth}
+              loading={loading}
+              onDemo={() => setMode("demo")}
+              onAuthenticated={async next => {
+                setAccount(next);
+                navigation.finishAuth();
+                await reload();
+              }}
+              onLegal={openLegal}
+              recoveryCode={recoveryCode}
+              setRecoveryCode={setRecoveryCode}
+            />
+          </div>
+          <Attribution />
+        </div>
+      </div>
+    );
 
   const screen = nav.screen;
   const doneNav: Nav = province ? { screen: "districts", provinceId: province.id } : MAP;
-  return <div className="page-canvas"><div className="phone">
-    <div className="app-content">
-      {screen === "map" && <MapScreen trips={trips} covers={coverByRegion} error={error} onRetry={() => void reload()}
-        onSearch={() => navigation.openOverlay("search")} onMenu={toggleMenu} onProvince={openProvince} onAdd={() => openForm()} />}
-      {screen === "districts" && province && <ProvinceScreen province={province} trips={trips} covers={coverByRegion} stats={stats}
-        onBack={back} onMenu={toggleMenu} onRegion={openRegion} onCover={() => navigation.openOverlay("cover")} onAdd={() => openForm()} />}
-      {screen === "region" && region && <RegionScreen region={region} trips={trips} stats={stats}
-        onBack={back} onMenu={toggleMenu} onAdd={() => openForm()} onRegion={openRegion} onTrip={openTrip} />}
-      {screen === "detail" && region && trip && <TripDetailScreen trip={trip} region={region}
-        onBack={back} onMenu={toggleMenu} onEdit={() => openForm(true)} />}
-      {/* An edit form waits for its trip: the form reads it only once, when it opens. */}
-      {screen === "form" && (!nav.editing || trip) && <TravelForm region={region} trip={nav.editing ? trip : null} mode={mode} onBack={back} onSaved={async saved => {
-        await reload();
-        // The completion screen takes the form's place, so back from it returns to where the form was opened.
-        replace({ screen: "complete", provinceId: provinceIdForRegion(saved.id), regionId: saved.id });
-      }} />}
-      {screen === "complete" && <div className="complete-view">
-        <div className="complete-mark"><MapPin size={54} strokeWidth={1} /></div>
-        <h1>{region?.fullName} 여행 기록 완료 !</h1>
-        <button className="solid-button" onClick={() => replace(doneNav)}>지도에서 보기</button>
-      </div>}
-      {screen === "my" && <MyScreen displayName={account?.displayName} email={account?.email} tripCount={trips.length} stats={stats} mode={mode}
-        onMenu={toggleMenu} onProvince={openProvince} onLogout={() => void logout()} onAccountMode={() => setMode("server")}
-        onDeleteAccount={() => navigation.openOverlay("deleteAccount")} onEmail={() => navigation.openOverlay("email")} onLegal={openLegal}
-        localCount={localTotal} onImport={() => navigation.openOverlay("import")} />}
-      {legal && <LegalScreen doc={legal} onBack={back} />}
-      {overlay === "menu" && <div className="more-menu">
-        <button onClick={() => openForm(screen === "detail")}>{screen === "detail" ? "기록 수정" : "여행기록 추가"}</button>
-        {screen === "detail" && trip && <button className="danger" onClick={() => navigation.openOverlay("deleteTrip")}><Trash2 size={14} /> 기록 삭제</button>}
-        <button onClick={() => navigation.openOverlay("search")}>지역 목록 보기</button>
-        {(screen === "map" || screen === "my") && <button onClick={() => navigation.openOverlay("share")}>지도 이미지 저장·공유</button>}
-        <button onClick={switchMode}>{mode === "demo" ? "계정으로 로그인" : "기기 체험 모드"}</button>
-      </div>}
+  return (
+    <div className="page-canvas">
+      <div className="phone">
+        <div className="app-content">
+          {screen === "map" && (
+            <MapScreen
+              trips={trips}
+              covers={coverByRegion}
+              error={error}
+              onRetry={() => void reload()}
+              onSearch={() => navigation.openOverlay("search")}
+              onMenu={toggleMenu}
+              onProvince={openProvince}
+              onAdd={() => openForm()}
+            />
+          )}
+          {screen === "districts" && province && (
+            <ProvinceScreen
+              province={province}
+              trips={trips}
+              covers={coverByRegion}
+              stats={stats}
+              onBack={back}
+              onMenu={toggleMenu}
+              onRegion={openRegion}
+              onCover={() => navigation.openOverlay("cover")}
+              onAdd={() => openForm()}
+            />
+          )}
+          {screen === "region" && region && (
+            <RegionScreen
+              region={region}
+              trips={trips}
+              stats={stats}
+              onBack={back}
+              onMenu={toggleMenu}
+              onAdd={() => openForm()}
+              onRegion={openRegion}
+              onTrip={openTrip}
+            />
+          )}
+          {screen === "detail" && region && trip && (
+            <TripDetailScreen trip={trip} region={region} onBack={back} onMenu={toggleMenu} onEdit={() => openForm(true)} />
+          )}
+          {/* An edit form waits for its trip: the form reads it only once, when it opens. */}
+          {screen === "form" && (!nav.editing || trip) && (
+            <TravelForm
+              region={region}
+              trip={nav.editing ? trip : null}
+              mode={mode}
+              onBack={back}
+              onSaved={async saved => {
+                await reload();
+                // The completion screen takes the form's place, so back from it returns to where the form was opened.
+                replace({ screen: "complete", provinceId: provinceIdForRegion(saved.id), regionId: saved.id });
+              }}
+            />
+          )}
+          {screen === "complete" && (
+            <div className="complete-view">
+              <div className="complete-mark">
+                <MapPin size={54} strokeWidth={1} />
+              </div>
+              <h1>{region?.fullName} 여행 기록 완료 !</h1>
+              <button className="solid-button" onClick={() => replace(doneNav)}>
+                지도에서 보기
+              </button>
+            </div>
+          )}
+          {screen === "my" && (
+            <MyScreen
+              displayName={account?.displayName}
+              email={account?.email}
+              tripCount={trips.length}
+              stats={stats}
+              mode={mode}
+              onMenu={toggleMenu}
+              onProvince={openProvince}
+              onLogout={() => void logout()}
+              onAccountMode={() => setMode("server")}
+              onDeleteAccount={() => navigation.openOverlay("deleteAccount")}
+              onEmail={() => navigation.openOverlay("email")}
+              onLegal={openLegal}
+              localCount={localTotal}
+              onImport={() => navigation.openOverlay("import")}
+            />
+          )}
+          {legal && <LegalScreen doc={legal} onBack={back} />}
+          {overlay === "menu" && (
+            <div className="more-menu">
+              <button onClick={() => openForm(screen === "detail")}>{screen === "detail" ? "기록 수정" : "여행기록 추가"}</button>
+              {screen === "detail" && trip && (
+                <button className="danger" onClick={() => navigation.openOverlay("deleteTrip")}>
+                  <Trash2 size={14} /> 기록 삭제
+                </button>
+              )}
+              <button onClick={() => navigation.openOverlay("search")}>지역 목록 보기</button>
+              {(screen === "map" || screen === "my") && (
+                <button onClick={() => navigation.openOverlay("share")}>지도 이미지 저장·공유</button>
+              )}
+              <button onClick={switchMode}>{mode === "demo" ? "계정으로 로그인" : "기기 체험 모드"}</button>
+            </div>
+          )}
+        </div>
+        {(screen === "map" || screen === "my") && (
+          <nav className="mobile-tabs" aria-label="주요 메뉴">
+            <button className={screen === "map" ? "current" : ""} onClick={() => openTab("map")}>
+              <MapPin size={19} fill="currentColor" />
+              <span>지도</span>
+            </button>
+            <button className={screen === "my" ? "current" : ""} onClick={() => openTab("my")}>
+              <UserRound size={19} fill="currentColor" />
+              <span>나</span>
+            </button>
+          </nav>
+        )}
+        {overlay === "search" && (
+          <RegionSearchSheet
+            query={query}
+            onQuery={setQuery}
+            stats={stats}
+            onClose={navigation.closeOverlay}
+            onPick={picked => (picked.level === "province" ? openProvince(picked) : openRegion(picked))}
+          />
+        )}
+        {overlay === "cover" && province && (
+          <ProvinceCoverSheet
+            province={province}
+            cover={coverByRegion.get(province.id)}
+            latestTrip={mostRecentTripForRegion(trips, province.id)}
+            mode={mode}
+            onClose={navigation.closeOverlay}
+            onChanged={reload}
+          />
+        )}
+        {overlay === "deleteTrip" && trip && region && (
+          <TripDeleteDialog trip={trip} region={region} onClose={navigation.closeOverlay} onDelete={deleteTrip} />
+        )}
+        {overlay === "deleteAccount" && <DeleteAccountDialog onClose={navigation.closeOverlay} onDelete={deleteAccount} />}
+        {overlay === "email" && <EmailDialog current={account?.email} onClose={navigation.closeOverlay} onSave={saveEmail} />}
+        {overlay === "share" && <ShareMapSheet trips={trips} covers={coverByRegion} stats={stats} onClose={navigation.closeOverlay} />}
+        {overlay === "import" && localCounts && (
+          <ImportDemoSheet
+            counts={localCounts}
+            onImport={importDemo}
+            onLater={() => {
+              sessionStorage.setItem("chaeummdo-import-later", "1");
+              navigation.closeOverlay();
+            }}
+          />
+        )}
+        <Attribution />
+      </div>
     </div>
-    {(screen === "map" || screen === "my") && <nav className="mobile-tabs" aria-label="주요 메뉴">
-      <button className={screen === "map" ? "current" : ""} onClick={() => openTab("map")}><MapPin size={19} fill="currentColor" /><span>지도</span></button>
-      <button className={screen === "my" ? "current" : ""} onClick={() => openTab("my")}><UserRound size={19} fill="currentColor" /><span>나</span></button>
-    </nav>}
-    {overlay === "search" && <RegionSearchSheet query={query} onQuery={setQuery} stats={stats} onClose={navigation.closeOverlay}
-      onPick={picked => picked.level === "province" ? openProvince(picked) : openRegion(picked)} />}
-    {overlay === "cover" && province && <ProvinceCoverSheet province={province} cover={coverByRegion.get(province.id)} latestTrip={mostRecentTripForRegion(trips, province.id)}
-      mode={mode} onClose={navigation.closeOverlay} onChanged={reload} />}
-    {overlay === "deleteTrip" && trip && region && <TripDeleteDialog trip={trip} region={region} onClose={navigation.closeOverlay} onDelete={deleteTrip} />}
-    {overlay === "deleteAccount" && <DeleteAccountDialog onClose={navigation.closeOverlay} onDelete={deleteAccount} />}
-    {overlay === "email" && <EmailDialog current={account?.email} onClose={navigation.closeOverlay} onSave={saveEmail} />}
-    {overlay === "share" && <ShareMapSheet trips={trips} covers={coverByRegion} stats={stats} onClose={navigation.closeOverlay} />}
-    {overlay === "import" && localCounts && <ImportDemoSheet counts={localCounts} onImport={importDemo}
-      onLater={() => { sessionStorage.setItem("chaeummdo-import-later", "1"); navigation.closeOverlay(); }} />}
-    <Attribution />
-  </div></div>;
+  );
 }

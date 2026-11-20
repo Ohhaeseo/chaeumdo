@@ -8,12 +8,17 @@ export function shapeMetrics(path) {
     const values = (ring.match(/-?\d+(?:\.\d+)?/g) || []).map(Number);
     if (values.length < 6) continue;
     let twice = 0;
-    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    let minX = Infinity,
+      minY = Infinity,
+      maxX = -Infinity,
+      maxY = -Infinity;
     for (let i = 0; i < values.length; i += 2) {
       const j = (i + 2) % values.length;
       twice += values[i] * values[j + 1] - values[j] * values[i + 1];
-      minX = Math.min(minX, values[i]); maxX = Math.max(maxX, values[i]);
-      minY = Math.min(minY, values[i + 1]); maxY = Math.max(maxY, values[i + 1]);
+      minX = Math.min(minX, values[i]);
+      maxX = Math.max(maxX, values[i]);
+      minY = Math.min(minY, values[i + 1]);
+      maxY = Math.max(maxY, values[i + 1]);
     }
     area += twice / 2;
     if (Math.abs(twice) > largest) {
