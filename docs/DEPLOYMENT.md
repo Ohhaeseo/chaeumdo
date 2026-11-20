@@ -91,7 +91,9 @@ docker compose --env-file .env.production -f compose.production.yaml exec backen
 
 ## 백업과 복구
 
-`backup` 서비스(`scripts/backup.sh`)는 백엔드가 정상 기동한 뒤 시작하며, 시작할 때 한 번, 그 뒤 24시간마다 백업합니다. 백엔드보다 먼저 사진 볼륨을 마운트하면 Docker가 볼륨을 root 소유로 만들어 백엔드가 사진을 저장하지 못하기 때문입니다. 백엔드는 사진 폴더에 쓸 수 없으면 시작하지 않고 로그에 이유를 남깁니다. 백업 한 번은 호스트의 `BACKUP_DIR`(기본 `./backups`) 아래 UTC 시각 이름의 폴더 하나입니다.
+`backup` 서비스(`scripts/backup.sh`)는 백엔드가 정상 기동한 뒤 시작하며, 시작할 때 한 번, 그 뒤 24시간마다 백업합니다.
+
+사진 볼륨(`media-data`)의 소유자는 백엔드 컨테이너가 시작할 때마다 직접 맞춥니다(`backend/docker-entrypoint.sh`). 진입 스크립트만 root로 돌아 소유자를 확인하고, 다르면 `app` 사용자로 바꾼 뒤 Java는 `app` 사용자로 실행합니다(`su-exec`). 새 볼륨에 이미지 폴더의 소유자가 넘어오는지는 Docker 엔진과 먼저 마운트한 컨테이너에 따라 달라지기 때문입니다. 실제로 CI 러너가 바뀐 뒤에 볼륨이 root 소유로 남아 업로드가 모두 실패했습니다. 그래도 백엔드가 사진 폴더에 쓸 수 없으면, 시작하지 않고 로그에 이유를 남깁니다. 백업 한 번은 호스트의 `BACKUP_DIR`(기본 `./backups`) 아래 UTC 시각 이름의 폴더 하나입니다.
 
 | 파일 | 내용 |
 |---|---|

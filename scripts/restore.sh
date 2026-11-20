@@ -26,8 +26,8 @@ read -r answer
 $compose stop backend backup
 # --clean drops each object before recreating it, so the database ends up exactly as dumped.
 $compose exec -T db pg_restore --clean --if-exists --no-owner -U chaeummdo -d chaeummdo < "$dir/db.dump"
-# The photo volume is emptied and refilled through a throwaway backend container, which mounts it
-# writable and runs as the same user that owns the files.
+# The photo volume is emptied and refilled through a throwaway backend container, which mounts it writable.
+# It runs as root, so tar restores the files' original owner; the backend's entrypoint checks it again on start.
 $compose run --rm --no-deps -T -v "$dir:/restore:ro" --entrypoint /bin/sh backend -c \
   'find /app/data/media -mindepth 1 -delete && tar -xzf /restore/media.tar.gz -C /app/data/media' \
   || { echo "photo restore failed; the database is already restored" >&2; exit 1; }
