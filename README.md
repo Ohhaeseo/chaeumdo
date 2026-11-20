@@ -127,6 +127,8 @@ Vite는 `/api` 요청을 `http://127.0.0.1:8080`으로 프록시합니다. 서�
 
 ```powershell
 cd frontend
+npm run lint          # ESLint (경고도 0개)
+npm run format:check  # Prettier 형식 (고칠 때는 npm run format)
 npm test
 npm run build
 
@@ -134,18 +136,26 @@ cd ../backend
 .\mvnw.cmd test
 ```
 
+화면 테스트(Playwright)는 백엔드를 `127.0.0.1:8080`에 지워도 되는 DB로 띄운 뒤 실행합니다. 테스트가 만든 계정은 끝나면 지웁니다. 처음 한 번 `npx playwright install chromium`이 필요하고, 설치된 Chrome을 쓰려면 `$env:E2E_CHANNEL="chrome"`을 설정합니다.
+
+```powershell
+cd frontend
+npm run e2e
+```
+
 API 통합 및 브라우저 검증 내역은 [검증 기록](docs/VALIDATION.md)에서 확인할 수 있습니다.
 
 ### CI
 
-`main` 푸시와 PR마다 GitHub Actions([`ci.yml`](.github/workflows/ci.yml))가 아래 네 작업을 서로 독립적으로 실행합니다.
+`main` 푸시와 PR마다 GitHub Actions([`ci.yml`](.github/workflows/ci.yml))가 아래 다섯 작업을 서로 독립적으로 실행합니다. 의존성 업데이트는 Dependabot([`dependabot.yml`](.github/dependabot.yml))이 매주 PR로 올립니다.
 
 | 작업 | 하는 일 |
 | --- | --- |
-| `frontend` | Node 22에서 `npm ci`, `npm test`, `npm run build` |
+| `frontend` | Node 22에서 `npm ci`, `npm run lint`, `npm run format:check`, `npm test`, `npm run build` |
+| `e2e` | PostgreSQL 17 서비스 컨테이너와 백엔드를 띄우고, 휴대폰 크기 Chromium으로 `frontend/e2e` 실행(가입 → 기록 저장·수정·삭제 → 뒤로가기 → 탈퇴, 약관 화면) |
 | `backend` | Temurin 21에서 `./mvnw -B test` |
-| `integration` | PostgreSQL 17 서비스 컨테이너에 백엔드 jar를 운영 프로필로 띄우고 `smoke-api.mjs`, `smoke-account.mjs` 실행 |
-| `containers` | 백엔드·프론트 이미지 빌드, `nginx -t`, `caddy validate`, `compose config` 확인 후 운영 compose 전체를 `localhost:8443`에 띄워 `smoke-stack.mjs`(Caddy 뒤 gzip, `index.html` `no-cache`, HTTPS 이동)와 `smoke-api.mjs` 실행 |
+| `integration` | PostgreSQL 17 서비스 컨테이너에 백엔드 jar를 운영 프로필로 띄우고 `smoke-api.mjs`, `smoke-account.mjs`(메일은 `MAIL_OUTBOX` 파일로) 실행 |
+| `containers` | 백엔드·프론트 이미지 빌드, `nginx -t`, `caddy validate`, `compose config` 확인 후 운영 compose 전체를 `localhost:8443`에 띄워 `smoke-stack.mjs`(Caddy 뒤 gzip, `index.html` `no-cache`, 앱 주소, manifest·아이콘, HTTPS 이동), 백업 서비스의 백업 확인, `smoke-api.mjs` 실행 |
 
 같은 전체 스택 검사를 로컬에서 돌리는 명령은 [`.github/ci/compose.stack.yaml`](.github/ci/compose.stack.yaml) 머리말에 있습니다.
 
@@ -158,6 +168,7 @@ API 통합 및 브라우저 검증 내역은 [검증 기록](docs/VALIDATION.md)
 - [디자인 시스템](docs/DESIGN_SYSTEM.md)
 - [데이터베이스·사진 저장 설계](docs/DATABASE.md)
 - [지도 구현 결정](docs/MAP.md)
+- [행정구역 데이터 갱신 절차](docs/REGIONS.md)
 - [검증 기록](docs/VALIDATION.md)
 - [운영 배포 가이드](docs/DEPLOYMENT.md)
 
