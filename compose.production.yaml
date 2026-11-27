@@ -7,7 +7,7 @@ x-logging: &logging
 
 services:
   db:
-    image: postgres:17-alpine
+    image: postgres:19-alpine
     restart: unless-stopped
     logging: *logging
     environment:
@@ -85,7 +85,7 @@ services:
   # Database dump and photo archive as one pair, at start and then once a day (scripts/backup.sh).
   # BACKUP_DIR on the host still has to be copied off this server; see docs/DEPLOYMENT.md.
   backup:
-    image: postgres:17-alpine
+    image: postgres:19-alpine
     restart: unless-stopped
     logging: *logging
     entrypoint: ["/bin/sh", "/opt/backup.sh", "--daily"]
